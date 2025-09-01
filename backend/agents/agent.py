@@ -1,8 +1,11 @@
+import os
+from dotenv import load_dotenv
 from google.adk.agents import Agent
 from google.adk.tools.agent_tool import AgentTool
+from google.adk.tools import FunctionTool
 from .sub_agents.jira_agent.agent import get_current_sprint
-from google.adk.agents import Agent
-from google.adk.tools.agent_tool import AgentTool
+
+load_dotenv()
 
 root_agent = Agent(
     name="core",
@@ -11,9 +14,10 @@ root_agent = Agent(
     instruction="""
 You are the core agent of a multi-agent system designed to manage and complete user tasks efficiently. 
 Your primary role is to coordinate between various specialized sub-agents, delegating tasks based on their expertise and capabilities.
+When using the 'get_current_sprint' tool, you must ask the user for the 'project_key' as it is a required argument for that tool.
     """,
     sub_agents=[],
     tools=[
-        AgentTool(get_current_sprint),
+        FunctionTool(get_current_sprint),
     ]
 )

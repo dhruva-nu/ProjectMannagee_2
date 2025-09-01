@@ -12,11 +12,12 @@ def get_current_sprint(project_key: str) -> str:
     Returns:
         str: The name of the current active sprint, or a message if none is found.
     """
+
     load_dotenv()
 
     jira_server = os.getenv("JIRA_SERVER")
     jira_username = os.getenv("JIRA_USERNAME")
-    jira_api_token = os.getenv("JIRA_API_TOKEN")
+    jira_api_token = os.getenv("JIRA_API")
 
     if not all([jira_server, jira_username, jira_api_token]):
         return "Error: Jira environment variables (JIRA_SERVER, JIRA_USERNAME, JIRA_API_TOKEN) are not set."
