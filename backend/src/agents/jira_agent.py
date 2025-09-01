@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from google.adk.agents import Agent
 
 # Import Jira tool adapter
-from server.app.tools.jira_tool import JiraTool
+from tools.jira_tool import JiraTool
 
 def _get_tool() -> JiraTool:
     """Create a JiraTool instance on demand using env vars.

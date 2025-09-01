@@ -1,7 +1,7 @@
 import os
 from typing import Any, Dict, List, Optional
 
-from server.app.jira_connector import JiraConnector
+from connectors.jira_connector import JiraConnector
 
 
 class JiraTool:
