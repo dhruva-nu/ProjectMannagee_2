@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
-from jira import JIRA
+import requests
+from requests.auth import HTTPBasicAuth
 
 def get_current_sprint(project_key: str) -> str:
     """
@@ -22,27 +23,31 @@ def get_current_sprint(project_key: str) -> str:
     if not all([jira_server, jira_username, jira_api_token]):
         return "Error: Jira environment variables (JIRA_SERVER, JIRA_USERNAME, JIRA_API_TOKEN) are not set."
 
+    auth = HTTPBasicAuth(jira_username, jira_api_token)
+    headers = {"Accept": "application/json"}
+
     try:
-        jira = JIRA(server=jira_server, basic_auth=(jira_username, jira_api_token))
+        # 1. Get boards for the project
+        boards_url = f"{jira_server}/rest/agile/1.0/board?projectKeyOrId={project_key}"
+        boards = requests.get(boards_url, headers=headers, auth=auth).json()
 
-        # Search for active sprints in the specified project
-        jql_query = f'project = "{project_key}" AND sprint in openSprints() ORDER BY created DESC'
-        issues_in_sprint = jira.search_issues(jql_query, maxResults=1)
+        if not boards.get("values"):
+            return f"No boards found for project {project_key}"
 
-        if issues_in_sprint:
-            # Assuming the first issue found will have the relevant sprint
-            # Jira API for sprints can be a bit tricky, often linked via issues
-            for field_name in issues_in_sprint[0].fields.__dict__:
-                if field_name.startswith('customfield_') and 'sprint' in field_name.lower():
-                    sprint_field = getattr(issues_in_sprint[0].fields, field_name)
-                    if sprint_field:
-                        # sprint_field is often a list of sprint objects
-                        for sprint in sprint_field:
-                            if hasattr(sprint, 'state') and sprint.state == 'ACTIVE':
-                                return f"Current active sprint for project '{project_key}': {sprint.name}"
-            return f"No active sprint found directly linked to issues in project '{project_key}'."
+        board_id = boards["values"][0]["id"]  # pick the first board (or let user choose)
+
+        # 2. Get active sprints for that board
+        sprints_url = f"{jira_server}/rest/agile/1.0/board/{board_id}/sprint?state=active"
+        sprints = requests.get(sprints_url, headers=headers, auth=auth).json()
+
+        if sprints.get("values"):
+            active = sprints["values"][0]
+            return (
+                f"Active sprint in {project_key}: {active['name']} "
+                f"(Start: {active.get('startDate')}, End: {active.get('endDate')})"
+            )
         else:
-            return f"No issues found in an active sprint for project '{project_key}'."
+            return f"No active sprint found for project {project_key}"
 
     except Exception as e:
         return f"An error occurred: {e}"
