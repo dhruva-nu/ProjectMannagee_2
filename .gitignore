@@ -1,4 +1,5 @@
 backend/.python-version
-backend/__pycache__/
+**/__pycache__
 backend/instance/
 backend/.venv
+backend/.env
