@@ -8,7 +8,7 @@ from .sub_agents.jira_cpa_agent.agent import jira_cpa_agent
 
 load_dotenv()
 
-root_agent = Agent(
+agent = Agent(
     name="core",
     model="gemini-2.0-flash",
     description="cordinates between all sub-agents to complete user tasks.",

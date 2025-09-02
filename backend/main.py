@@ -1,20 +1,29 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from .agents.agent import root_agent
-from .agents.sub_agents.jira_sprint_agent.agent import (
-    summarize_current_sprint_v1,
-    summarize_current_sprint_default,
-)
+from pydantic import BaseModel
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types as genai_types
 from dotenv import load_dotenv
 from pathlib import Path
 import anyio
 import logging
 import re
+from .agents.agent import agent
 
 app = FastAPI()
 
+class AgentRequest(BaseModel):
+    agent_name: str | None = None
+    prompt: str | None = None
+
 # Load env from backend/.env explicitly so agents have credentials
 load_dotenv(dotenv_path=(Path(__file__).parent / ".env"))
+
+# This is new: Initialize the ADK Runner
+session_service = InMemorySessionService()
+runner = Runner(app_name="ProjectMannagee", agent=agent, session_service=session_service)
+
 
 # Enable CORS for local frontend dev server
 app.add_middleware(
@@ -29,25 +38,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def _to_text(resp) -> str:
-    """Normalize ADK Agent outputs to a user-facing string."""
-    try:
-        if resp is None:
-            return ""
-        if isinstance(resp, str):
-            return resp.strip()
-        if isinstance(resp, dict):
-            # Common fields in various ADK responses
-            for k in ("text", "response", "output", "content", "message"):
-                v = resp.get(k)
-                if isinstance(v, str) and v.strip():
-                    return v.strip()
-        # Fallback to stringification
-        s = str(resp)
-        return s.strip()
-    except Exception:
-        return ""
-
 @app.get("/")
 async def root():
     return {"message": "Hello from backend!"}
@@ -57,64 +47,55 @@ async def debug_ping():
     return {"pong": True}
 
 @app.post("/codinator/run-agent")
-async def run_codinator_agent(agent_name: str, prompt: str):
+async def run_codinator_agent(
+    request: AgentRequest | None = None,
+    agent_name: str | None = None,
+    prompt: str | None = None,
+):
     """
     Compatibility endpoint used by the frontend ChatBox. Ignores agent_name and
     forwards the prompt to the core root_agent.
     """
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("api")
-    logger.info("/codinator/run-agent start | agent_name=%s", agent_name)
     try:
-        # Prefer the ADK Agent.run if available
-        run_fn = getattr(root_agent, "run", None)
-        if callable(run_fn):
-            with anyio.move_on_after(45) as cancel_scope:  # 45s timeout
-                response = await anyio.to_thread.run_sync(run_fn, prompt)
-            if cancel_scope.cancel_called:
-                logger.warning("/codinator/run-agent timeout")
-                raise HTTPException(status_code=504, detail="Agent timed out")
-            text = _to_text(response)
-            if not text:
-                logger.error("/codinator/run-agent empty response from agent | raw=%r", response)
-                raise HTTPException(status_code=502, detail="Empty response from agent")
-            logger.info("/codinator/run-agent success (root_agent.run)")
-            return {"response": text}
+        # Generate a unique session_id for each request.
+        # Note: In a real app, you'd want to manage sessions more robustly.
+        session_id = f"session_{anyio.current_time()}"
+        user_id = "user_123"  # A placeholder user_id
 
-        # Fallback: lightweight router for common Jira intents
-        logger.info("/codinator/run-agent using fallback router (no .run on Agent)")
-        p = (prompt or "").strip()
-        # e.g., "what is the current sprint for TESTPROJ" or "current sprint for TESTPROJ"
-        m = re.search(r"current\s+sprint\s+for\s+([A-Za-z0-9_\-]+)", p, flags=re.IGNORECASE)
-        if m:
-            project_key = m.group(1)
-            with anyio.move_on_after(45) as cancel_scope:
-                response = await anyio.to_thread.run_sync(summarize_current_sprint_v1, project_key)
-            if cancel_scope.cancel_called:
-                logger.warning("/codinator/run-agent timeout (fallback)")
-                raise HTTPException(status_code=504, detail="Agent timed out")
-            text = _to_text(response)
-            if not text:
-                raise HTTPException(status_code=502, detail="Empty response from fallback agent")
-            return {"response": text}
+        session_service.create_session(app_name=runner.app_name, user_id=user_id, session_id=session_id)
 
-        # If user didn’t specify project key, try memory-based default
-        if re.search(r"current\s+sprint", p, flags=re.IGNORECASE):
-            with anyio.move_on_after(45) as cancel_scope:
-                response = await anyio.to_thread.run_sync(summarize_current_sprint_default)
-            if cancel_scope.cancel_called:
-                logger.warning("/codinator/run-agent timeout (fallback default)")
-                raise HTTPException(status_code=504, detail="Agent timed out")
-            text = _to_text(response)
-            if not text:
-                text = "Please provide a Jira project_key, e.g., 'current sprint for TESTPROJ'."
-            return {"response": text}
+        # Accept prompt from either JSON body or query/form parameters
+        effective_prompt = prompt or (request.prompt if request else None)
+        if not effective_prompt or not effective_prompt.strip():
+            raise HTTPException(status_code=422, detail="Missing 'prompt'. Provide it in JSON body or as query param ?prompt=")
 
-        # Generic fallback
-        raise HTTPException(
-            status_code=400,
-            detail="Unsupported prompt in fallback mode and root agent .run is unavailable.",
-        )
+        message = genai_types.Content(role="user", parts=[genai_types.Part(text=effective_prompt)])
+
+        final_response = ""
+        with anyio.move_on_after(45) as cancel_scope:  # 45s timeout
+            async for event in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=message,
+            ):
+                if event.is_final_response():
+                    if event.content and event.content.parts:
+                        final_response = "".join(part.text for part in event.content.parts if part.text)
+                    break  # Exit after getting the final response
+
+        if cancel_scope.cancel_called:
+            logger.warning("/codinator/run-agent timeout")
+            raise HTTPException(status_code=504, detail="Agent timed out")
+
+        if not final_response:
+            logger.error("/codinator/run-agent empty response from agent")
+            raise HTTPException(status_code=502, detail="Empty response from agent")
+
+        logger.info("/codinator/run-agent success")
+        return {"response": final_response}
+
     except HTTPException:
         raise
     except Exception as e:
