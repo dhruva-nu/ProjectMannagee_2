@@ -7,6 +7,8 @@ from backend.tools.jira.sprint_tools import (
     summarize_current_sprint_default,
     summarize_issues_in_sprint_default,
 )
+from backend.tools.jira.user_issues_tools import get_issues_assigned_to_user
+
 
 """
 This module defines `jira_sprint_agent`, an orchestrating Agent that wraps
@@ -32,6 +34,7 @@ jira_sprint_agent = Agent(
         FunctionTool(summarize_issues_in_sprint_v1),
         FunctionTool(summarize_current_sprint_default),
         FunctionTool(summarize_issues_in_sprint_default),
+        FunctionTool(get_issues_assigned_to_user),
     ],
     sub_agents=[],
 )

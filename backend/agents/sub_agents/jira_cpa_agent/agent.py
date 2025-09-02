@@ -7,6 +7,8 @@ from backend.tools.jira.cpa_tools import (
     what_is_blocking,
     answer_sprint_hypothetical,
     who_is_assigned,
+    transition_issue_status,
+    add_comment_to_issue,
 )
 
 """
@@ -32,6 +34,8 @@ jira_cpa_agent = Agent(
         FunctionTool(what_is_blocking),
         FunctionTool(answer_sprint_hypothetical),
         FunctionTool(who_is_assigned),
+        FunctionTool(transition_issue_status),
+        FunctionTool(add_comment_to_issue),
     ],
     sub_agents=[],
 )

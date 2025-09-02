@@ -308,3 +308,80 @@ def who_is_assigned(issue_key: str) -> str:
         return f"Could not find details for Jira issue {issue_key}."
     assignee = details.get("assignee") or "unassigned"
     return f"{issue_key} is assigned to: {assignee}"
+
+def transition_issue_status(issue_key: str, new_status: str) -> str:
+    """
+    Transitions the status of a Jira issue to the specified new status.
+
+    Args:
+        issue_key: The key of the Jira issue (e.g., "PROJ-123").
+        new_status: The target status name (e.g., "Done", "In Progress").
+
+    Returns:
+        A message indicating the success or failure of the transition.
+    """
+    load_dotenv()
+    jira_server, jira_username, jira_api_token = _jira_env()
+    auth = HTTPBasicAuth(jira_username, jira_api_token)
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+
+    # 1. Get available transitions for the issue
+    transitions_url = f"{jira_server}/rest/api/2/issue/{issue_key}/transitions"
+    response = requests.get(transitions_url, headers=headers, auth=auth).json()
+
+    if response.get("errorMessages"):
+        return f"Error fetching transitions for {issue_key}: {response.get('errorMessages')}"
+
+    transitions = response.get("transitions", [])
+    transition_id = None
+    for t in transitions:
+        if t.get("name").lower() == new_status.lower():
+            transition_id = t.get("id")
+            break
+
+    if not transition_id:
+        available_statuses = ", ".join([t.get("name") for t in transitions])
+        return f"Status '{new_status}' is not a valid transition for {issue_key}. Available transitions: {available_statuses or 'None'}."
+
+    # 2. Execute the transition
+    transition_url = f"{jira_server}/rest/api/2/issue/{issue_key}/transitions"
+    payload = {
+        "transition": {
+            "id": transition_id
+        }
+    }
+    response = requests.post(transition_url, headers=headers, auth=auth, data=json.dumps(payload))
+
+    if response.status_code == 204: # 204 No Content indicates success
+        return f"Successfully transitioned issue {issue_key} to status '{new_status}'."
+    else:
+        error_message = response.json().get("errorMessages", response.text)
+        return f"Failed to transition issue {issue_key} to '{new_status}': {error_message}"
+
+def add_comment_to_issue(issue_key: str, comment_body: str) -> str:
+    """
+    Adds a comment to a specified Jira issue.
+
+    Args:
+        issue_key: The key of the Jira issue (e.g., "PROJ-123").
+        comment_body: The content of the comment to add.
+
+    Returns:
+        A message indicating the success or failure of adding the comment.
+    """
+    load_dotenv()
+    jira_server, jira_username, jira_api_token = _jira_env()
+    auth = HTTPBasicAuth(jira_username, jira_api_token)
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+
+    comment_url = f"{jira_server}/rest/api/2/issue/{issue_key}/comment"
+    payload = {
+        "body": comment_body
+    }
+    response = requests.post(comment_url, headers=headers, auth=auth, data=json.dumps(payload))
+
+    if response.status_code == 201: # 201 Created indicates success
+        return f"Successfully added comment to issue {issue_key}."
+    else:
+        error_message = response.json().get("errorMessages", response.text)
+        return f"Failed to add comment to issue {issue_key}: {error_message}"
