@@ -8,14 +8,38 @@ from dotenv import load_dotenv
 from pathlib import Path
 import anyio
 import logging
+from datetime import datetime, timedelta, timezone
 import re
 from .agents.agent import agent
 import os
 import requests
 from requests.auth import HTTPBasicAuth
 from backend.tools.jira.sprint_tools import _fetch_active_sprint
+from fastapi import Depends, status, Header
+from passlib.hash import bcrypt
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+from backend.app.db.database import get_db
+from jose import jwt, JWTError
 
 app = FastAPI()
+
+class User(BaseModel):
+    id: int
+    username: str
+    hashed_password: str
+    skills: dict = {}
+
+    class Config:
+        from_attributes = True
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
 
 class AgentRequest(BaseModel):
     agent_name: str | None = None
@@ -42,6 +66,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# JWT configuration
+SECRET_KEY = os.getenv("JWT_SECRET", "dev-secret-change-me")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def _unauthorized(detail: str = "Not authenticated"):
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
+
+def get_current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        _unauthorized("Missing bearer token")
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str | None = payload.get("sub")
+        if not username:
+            _unauthorized("Invalid token payload")
+        user_row = db.execute(
+            text("""SELECT id, username, hashed_password, skills FROM users WHERE username = :username"""),
+            {"username": username}
+        ).fetchone()
+        if not user_row:
+            _unauthorized("User not found")
+        return User(id=user_row.id, username=user_row.username, hashed_password=user_row.hashed_password, skills=user_row.skills or {})
+    except JWTError:
+        _unauthorized("Invalid or expired token")
+
 @app.get("/")
 async def root():
     return {"message": "Hello from backend!"}
@@ -50,11 +107,66 @@ async def root():
 async def debug_ping():
     return {"pong": True}
 
+@app.post("/login")
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
+    user = db.execute(
+        text("""SELECT id, username, hashed_password, skills FROM users WHERE username = :username"""),
+        {"username": request.username}
+    ).fetchone()
+
+    if not user or not bcrypt.verify(request.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials"
+        )
+    # Issue JWT token
+    access_token = create_access_token({"sub": user.username})
+    return {
+        "message": "Login successful",
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user_id": user.id,
+        "username": user.username,
+    }
+
+@app.get("/auth/me")
+async def auth_me(current_user: User = Depends(get_current_user)):
+    return {"id": current_user.id, "username": current_user.username, "skills": current_user.skills}
+
+@app.post("/register")
+async def register(request: RegisterRequest, db: Session = Depends(get_db)):
+    # Check if username already exists
+    existing_user = db.execute(
+        text("""SELECT id FROM users WHERE username = :username"""),
+        {"username": request.username}
+    ).fetchone()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username already registered"
+        )
+
+    hashed_password = bcrypt.hash(request.password)
+
+    try:
+        db.execute(
+            text("""INSERT INTO users (username, hashed_password) VALUES (:username, :hashed_password)"""),
+            {"username": request.username, "hashed_password": hashed_password}
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+    return {"message": "Registration successful"}
+
 @app.post("/codinator/run-agent")
 async def run_codinator_agent(
     request: AgentRequest | None = None,
     agent_name: str | None = None,
     prompt: str | None = None,
+    current_user: User = Depends(get_current_user),
 ):
     """
     Compatibility endpoint used by the frontend ChatBox. Ignores agent_name and
@@ -66,7 +178,7 @@ async def run_codinator_agent(
         # Generate a unique session_id for each request.
         # Note: In a real app, you'd want to manage sessions more robustly.
         session_id = f"session_{anyio.current_time()}"
-        user_id = "user_123"  # A placeholder user_id
+        user_id = str(current_user.id)
 
         session_service.create_session(app_name=runner.app_name, user_id=user_id, session_id=session_id)
 
@@ -107,7 +219,7 @@ async def run_codinator_agent(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/jira/issue-status")
-async def jira_issue_status(key: str = Query(..., description="Jira issue key, e.g., PROJ-123")):
+async def jira_issue_status(key: str = Query(..., description="Jira issue key, e.g., PROJ-123"), current_user: User = Depends(get_current_user)):
     """
     Return Jira issue status data for the given key, including:
     - name (summary)
@@ -176,7 +288,7 @@ async def jira_issue_status(key: str = Query(..., description="Jira issue key, e
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/jira/sprint-status")
-async def jira_sprint_status(project_key: str = Query(..., description="Jira project key, e.g., PROJ")):
+async def jira_sprint_status(project_key: str = Query(..., description="Jira project key, e.g., PROJ"), current_user: User = Depends(get_current_user)):
     """
     Return the current active sprint details for a given Jira project key.
     Response includes: name, startDate, endDate, and optional notes.
