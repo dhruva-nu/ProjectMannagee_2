@@ -1,9 +1,50 @@
+jira_agent = None  # forward-declare for linting; actual instance is below
 import os
 from dotenv import load_dotenv
 import requests
 from requests.auth import HTTPBasicAuth
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
+
+"""
+Lightweight in-process memory to avoid re-asking for parameters.
+We only store what's necessary: last project_key and last active sprint.
+This is NOT persisted and uses zero extra LLM tokens.
+"""
+_MEMORY = {
+    "project_key": None,  # type: str | None
+    "sprint": None,       # type: dict | None
+}
+
+def _remember(project_key: str | None = None, sprint: dict | None = None):
+    if project_key:
+        _MEMORY["project_key"] = project_key
+    if sprint:
+        _MEMORY["sprint"] = sprint
+
+def _recall_project_key() -> str | None:
+    return _MEMORY.get("project_key")
+
+def _recall_active_sprint() -> dict | None:
+    return _MEMORY.get("sprint")
+
+def summarize_current_sprint_default() -> str:
+    """
+    No-arg tool: uses remembered project_key if available.
+    """
+    project_key = _recall_project_key()
+    if not project_key:
+        return "Please provide a Jira project_key."
+    return summarize_current_sprint_v1(project_key)
+
+def summarize_issues_in_sprint_default(max_results: int = 50) -> str:
+    """
+    No-arg tool: uses remembered project_key if available.
+    """
+    project_key = _recall_project_key()
+    if not project_key:
+        return "Please provide a Jira project_key."
+    return summarize_issues_in_sprint_v1(project_key, max_results=max_results)
 
 def _fetch_active_sprint(project_key: str) -> dict | None:
     """Internal: fetch the first active sprint for the project."""
@@ -23,12 +64,14 @@ def _fetch_active_sprint(project_key: str) -> dict | None:
     sprints = requests.get(sprints_url, headers=headers, auth=auth).json()
     if sprints.get("values"):
         active = sprints["values"][0]
-        return {
+        sprint_info = {
             "id": active["id"],
             "name": active["name"],
             "startDate": active.get("startDate"),
             "endDate": active.get("endDate"),
         }
+        _remember(project_key=project_key, sprint=sprint_info)
+        return sprint_info
     return None
 
 
@@ -70,7 +113,7 @@ def _fetch_issues_in_active_sprint(project_key: str, max_results: int = 50):
 # Removed external get_issue_details; CPA agent now fetches details directly.
 
 
-def summarize_current_sprint(project_key: str) -> str:
+def summarize_current_sprint_v1(project_key: str) -> str:
     """
     Uses Gemini ADK (gemini-2.0-flash) to generate a concise summary of the
     current active sprint for the provided Jira project. Fetches sprint data
@@ -91,7 +134,7 @@ def summarize_current_sprint(project_key: str) -> str:
     )
     try:
         llm_agent = Agent(
-            name="jira-sprint-llm",
+            name="jira_sprint_llm",
             model="gemini-2.0-flash",
             description="Summarizes Jira sprint details",
             instruction=system_instruction,
@@ -108,7 +151,7 @@ def summarize_current_sprint(project_key: str) -> str:
         return f"Active sprint: {name}. Start: {start}, End: {end}. (LLM fallback due to error: {e})"
 
 
-def summarize_issues_in_sprint(project_key: str, max_results: int = 50) -> str:
+def summarize_issues_in_sprint_v1(project_key: str, max_results: int = 50) -> str:
     """
     Uses Gemini ADK (gemini-2.0-flash) to produce a concise summary of issues
     in the current sprint for a project. Fetches issues internally and
@@ -139,7 +182,7 @@ def summarize_issues_in_sprint(project_key: str, max_results: int = 50) -> str:
     )
     try:
         llm_agent = Agent(
-            name="jira-issues-llm",
+            name="jira_issues_llm",
             model="gemini-2.0-flash",
             description="Summarizes Jira sprint issues",
             instruction=system_instruction,
@@ -174,13 +217,18 @@ jira_agent = Agent(
     model="gemini-2.0-flash",
     description="Jira sub-agent handling sprint summaries and issue overviews",
     instruction=(
-        "You are a specialized Jira sub-agent. Use your tools to summarize the current sprint "
-        "or summarize issues in the active sprint. For summarize_current_sprint and "
-        "summarize_issues_in_sprint, ask for the required 'project_key'."
+        "You are a specialized Jira sub-agent. To avoid unnecessary parameter asks: "
+        "1) If the user omits project_key, prefer calling the no-arg tools that use memory: "
+        "summarize_current_sprint_default and summarize_issues_in_sprint_default. "
+        "2) If the user specifies project_key, call the explicit tools with that parameter: "
+        "summarize_current_sprint_v1 or summarize_issues_in_sprint_v1. "
+        "Only ask for project_key when neither memory nor user input provides it."
     ),
     tools=[
-        FunctionTool(summarize_current_sprint),
-        FunctionTool(summarize_issues_in_sprint),
+        FunctionTool(summarize_current_sprint_v1),
+        FunctionTool(summarize_issues_in_sprint_v1),
+        FunctionTool(summarize_current_sprint_default),
+        FunctionTool(summarize_issues_in_sprint_default),
     ],
     sub_agents=[],
 )

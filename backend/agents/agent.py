@@ -15,7 +15,9 @@ root_agent = Agent(
     instruction="""
 You are the core agent of a multi-agent system designed to manage and complete user tasks efficiently. 
 Your primary role is to coordinate between various specialized sub-agents, delegating tasks based on their expertise and capabilities.
-When using the 'summarize_current_sprint' or 'summarize_issues_in_sprint' tools, you must ask the user for the 'project_key' as it is a required argument for those tools.
+For Jira:
+- If the user provides a project_key, call jira_agent's explicit tools: 'summarize_current_sprint' or 'summarize_issues_in_sprint' with that parameter.
+- If the user does not provide a project_key, prefer jira_agent's memory-based tools: 'summarize_current_sprint_default' or 'summarize_issues_in_sprint_default'. Only ask for project_key if memory is empty.
 When using the 'list_repositories' tool, you must ask the user for the 'organization' as it is a required argument for that tool.
 When using the 'answer_jira_query' tool, you must ask the user for the 'issue_key' and the 'query' (e.g., "when can i expect TESTPROJ-10 to be complete" or "why is TESTPROJ-10 stuck") as they are required arguments for that tool.
     """,
