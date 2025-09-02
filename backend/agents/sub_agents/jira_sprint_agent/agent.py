@@ -141,8 +141,15 @@ def summarize_current_sprint_v1(project_key: str) -> str:
             tools=[],
             sub_agents=[],
         )
-        answer = llm_agent.run(user_prompt)
-        return answer["text"] if isinstance(answer, dict) and "text" in answer else str(answer)
+        run_fn = getattr(llm_agent, "run", None)
+        if callable(run_fn):
+            answer = run_fn(user_prompt)
+            return answer["text"] if isinstance(answer, dict) and "text" in answer else str(answer)
+        # If .run is unavailable in this ADK version, provide a clean deterministic summary.
+        name = sprint.get("name")
+        start = sprint.get("startDate")
+        end = sprint.get("endDate")
+        return f"Active sprint: {name}. Start: {start}, End: {end}."
     except Exception as e:
         # Fallback to deterministic formatting
         name = sprint.get("name")
@@ -189,8 +196,26 @@ def summarize_issues_in_sprint_v1(project_key: str, max_results: int = 50) -> st
             tools=[],
             sub_agents=[],
         )
-        answer = llm_agent.run(user_prompt)
-        return answer["text"] if isinstance(answer, dict) and "text" in answer else str(answer)
+        run_fn = getattr(llm_agent, "run", None)
+        if callable(run_fn):
+            answer = run_fn(user_prompt)
+            return answer["text"] if isinstance(answer, dict) and "text" in answer else str(answer)
+        # If .run is unavailable, return deterministic roll-up without error tag.
+        lines = []
+        sprint_name = sprint.get("name") if sprint else "(unknown)"
+        lines.append(f"Sprint: {sprint_name}. Issues: {len(issues)}.")
+        status_counts = {}
+        for it in issues:
+            st = it.get("status") or "Unknown"
+            status_counts[st] = status_counts.get(st, 0) + 1
+        if status_counts:
+            lines.append("By status: " + ", ".join(f"{k}: {v}" for k, v in status_counts.items()))
+        sample = issues[:5]
+        if sample:
+            lines.append("Sample:")
+            for it in sample:
+                lines.append(f"- {it.get('key')}: {it.get('summary')} (status: {it.get('status')}, assignee: {it.get('assignee')})")
+        return "\n".join(lines)
     except Exception as e:
         # Fallback: simple roll-up
         lines = []

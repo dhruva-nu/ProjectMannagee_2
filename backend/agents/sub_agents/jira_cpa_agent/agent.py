@@ -191,13 +191,14 @@ def answer_jira_query(issue_key: str, query: str) -> str:
             tools=[],
             sub_agents=[],
         )
-        answer = llm_agent.run(user_prompt)
-        # Some ADK versions return dict/messages; ensure we return string
-        if isinstance(answer, dict) and "text" in answer:
-            return answer["text"]
-        return str(answer)
-    except Exception as e:
-        # Fallback to a simple deterministic summary if LLM fails
+        run_fn = getattr(llm_agent, "run", None)
+        if callable(run_fn):
+            answer = run_fn(user_prompt)
+            # Some ADK versions return dict/messages; ensure we return string
+            if isinstance(answer, dict) and "text" in answer:
+                return answer["text"]
+            return str(answer)
+        # If .run is unavailable, return deterministic summary without error tag.
         fallback = [
             f"Regarding Jira issue {issue_key} ('{summary}'), currently assigned to {assignee} and in status '{status}':",
         ]
@@ -215,7 +216,26 @@ def answer_jira_query(issue_key: str, query: str) -> str:
             fallback.append("Blocking issues:")
             for b in blockers:
                 fallback.append(f"- {b.get('key')}: {b.get('summary')}")
-        fallback.append(f"(LLM fallback due to error: {e})")
+        return "\n".join(fallback)
+    except Exception:
+        # Fallback to a simple deterministic summary if any runtime error occurs
+        fallback = [
+            f"Regarding Jira issue {issue_key} ('{summary}'), currently assigned to {assignee} and in status '{status}':",
+        ]
+        if resolution_date:
+            fallback.append(f"Resolved on {resolution_date}.")
+        elif due_date:
+            fallback.append(f"Due date: {due_date}.")
+        if labels:
+            fallback.append(f"Labels: {', '.join(labels)}.")
+        if last_comments:
+            fallback.append("Recent comments:")
+            for i, c in enumerate(last_comments, 1):
+                fallback.append(f"- {i}. {c}")
+        if blockers:
+            fallback.append("Blocking issues:")
+            for b in blockers:
+                fallback.append(f"- {b.get('key')}: {b.get('summary')}")
         return "\n".join(fallback)
 
 # Expose as a sub-agent that can be used via AgentTool by the root agent
@@ -340,12 +360,13 @@ def answer_sprint_hypothetical(project_key: str, issue_key: str, query: str) -> 
             tools=[],
             sub_agents=[],
         )
-        answer = llm_agent.run(user_prompt)
-        if isinstance(answer, dict) and "text" in answer:
-            return answer["text"]
-        return str(answer)
-    except Exception as e:
-        # Deterministic fallback with math
+        run_fn = getattr(llm_agent, "run", None)
+        if callable(run_fn):
+            answer = run_fn(user_prompt)
+            if isinstance(answer, dict) and "text" in answer:
+                return answer["text"]
+            return str(answer)
+        # Deterministic summary when .run is unavailable
         lines = [f"Sprint: {sprint.get('name')} (start: {start_str}, end: {end_str})."]
         lines.append(f"Removed issue: {issue_key} (SP: {removed_sp}).")
         lines.append(f"Remaining issues: {len(remaining)} | Remaining SP: {remaining_sp:.2f} | Completed SP: {completed_sp:.2f}.")
@@ -358,7 +379,21 @@ def answer_sprint_hypothetical(project_key: str, issue_key: str, query: str) -> 
                 lines.append("Within sprint: " + ("YES" if projected_completion <= end_dt else "NO"))
         else:
             lines.append("Insufficient data to compute burn rate (no completed SP or missing SP field).")
-        lines.append(f"(LLM fallback due to error: {e})")
+        return "\n".join(lines)
+    except Exception:
+        # Deterministic fallback with math for any runtime error
+        lines = [f"Sprint: {sprint.get('name')} (start: {start_str}, end: {end_str})."]
+        lines.append(f"Removed issue: {issue_key} (SP: {removed_sp}).")
+        lines.append(f"Remaining issues: {len(remaining)} | Remaining SP: {remaining_sp:.2f} | Completed SP: {completed_sp:.2f}.")
+        lines.append("By status: " + ", ".join(f"{k}: {v}" for k, v in by_status.items()) if by_status else "By status: none")
+        lines.append("By assignee: " + ", ".join(f"{k}: {v}" for k, v in by_assignee.items()) if by_assignee else "By assignee: none")
+        if burn_rate > 0 and projected_days is not None:
+            projected_completion = today + timedelta(days=max(projected_days, 0))
+            lines.append(f"Burn rate: {burn_rate:.2f} SP/day | Projected completion: {projected_completion.date().isoformat()}.")
+            if end_dt:
+                lines.append("Within sprint: " + ("YES" if projected_completion <= end_dt else "NO"))
+        else:
+            lines.append("Insufficient data to compute burn rate (no completed SP or missing SP field).")
         return "\n".join(lines)
 
 def who_is_assigned(issue_key: str) -> str:
