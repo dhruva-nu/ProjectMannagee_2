@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { forwardRef, useImperativeHandle, useState } from 'react'
 import JiraStatus, { type JiraStatusData } from './JiraStatus'
 import SprintStatus, { type SprintStatusData } from './SprintStatus'
 
@@ -12,7 +12,12 @@ type Message = {
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000'
 
-export default function ChatBox() {
+export type ChatBoxHandle = {
+  sendContent: (content: string) => Promise<void>
+  insertText: (text: string) => void
+}
+
+const ChatBox = forwardRef<ChatBoxHandle>(function ChatBox(_, ref) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -49,11 +54,10 @@ export default function ChatBox() {
     return null
   }
 
-  const sendMessage = async () => {
-    if (!input.trim() || loading) return
-    const userMsg: Message = { role: 'user', content: input }
+  const coreSend = async (text: string) => {
+    if (!text.trim() || loading) return
+    const userMsg: Message = { role: 'user', content: text }
     setMessages((prev) => [...prev, userMsg])
-    setInput('')
     setLoading(true)
 
     try {
@@ -136,6 +140,24 @@ export default function ChatBox() {
     }
   }
 
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return
+    const current = input
+    setInput('')
+    await coreSend(current)
+  }
+
+  useImperativeHandle(ref, () => ({
+    sendContent: async (content: string) => {
+      await coreSend(content)
+    },
+    insertText: (text: string) => {
+      const t = (text || '').trim()
+      if (!t) return
+      setInput((prev) => (prev && prev.trim().length > 0 ? `${prev} ${t}` : t))
+    },
+  }))
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -197,4 +219,6 @@ export default function ChatBox() {
       </div>
     </div>
   )
-}
+})
+
+export default ChatBox
