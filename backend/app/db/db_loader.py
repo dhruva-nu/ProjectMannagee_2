@@ -1,4 +1,4 @@
-from models import TaskModel, ProjectModel
+from .models import TaskModel, ProjectModel
 from dotenv import load_dotenv
 
 load_dotenv()

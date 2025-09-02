@@ -5,6 +5,7 @@ from google.adk.tools.agent_tool import AgentTool
 from .sub_agents.jira_sprint_agent.agent import jira_sprint_agent
 from .sub_agents.github_repo_agent.agent import github_repo_agent
 from .sub_agents.jira_cpa_agent.agent import jira_cpa_agent
+from .sub_agents.cpa_engine_agent.agent import cpa_engine_agent
 
 load_dotenv()
 
@@ -36,10 +37,11 @@ When using the 'answer_jira_query' tool, you must ask the user for the 'issue_ke
    {"ui": "jira_status", "key": "PROJ-123"}
  - Do not include analysis or extra text around the JSON. If the issue key is unclear, ask a clarifying question in plain text.
     """,
-    sub_agents=[jira_sprint_agent, github_repo_agent, jira_cpa_agent],
+    sub_agents=[jira_sprint_agent, github_repo_agent, jira_cpa_agent, cpa_engine_agent],
     tools=[
         AgentTool(jira_sprint_agent),
         AgentTool(github_repo_agent),
         AgentTool(jira_cpa_agent),
+        AgentTool(cpa_engine_agent),
     ]
 )
