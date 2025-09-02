@@ -27,6 +27,11 @@ When using the 'answer_jira_query' tool, you must ask the user for the 'issue_ke
  - query (the user's question)
  Use jira_cpa_agent's 'answer_sprint_hypothetical(project_key, issue_key, query)'.
  For assignee lookups, use jira_cpa_agent's 'who_is_assigned(issue_key)'. For blockers, use 'what_is_blocking(issue_key)'.
+
+ Generative UI directive:
+ - When the user asks for the Jira status for a specific issue (e.g., "JIRA status for issue PROJ-123"), respond ONLY with a single-line JSON object, no prose, in the exact format:
+   {"ui": "jira_status", "key": "PROJ-123"}
+ - Do not include analysis or extra text around the JSON. If the issue key is unclear, ask a clarifying question in plain text.
     """,
     sub_agents=[jira_sprint_agent, github_repo_agent, jira_cpa_agent],
     tools=[

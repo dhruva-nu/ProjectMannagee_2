@@ -1,8 +1,10 @@
 import { useState } from 'react'
+import JiraStatus, { type JiraStatusData } from './JiraStatus'
 
 type Message = {
   role: 'user' | 'assistant' | 'system'
-  content: string
+  content?: string
+  ui?: { type: 'jira_status'; data: JiraStatusData }
 }
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000'
@@ -13,6 +15,32 @@ export default function ChatBox() {
   const [loading, setLoading] = useState(false)
   const [agentName, setAgentName] = useState('codinator')
 
+  // Try to parse a UI directive from raw model text.
+  // Supports plain JSON, ```json fenced blocks, ``` fenced blocks, and inline objects.
+  const parseDirective = (raw: string): any | null => {
+    if (!raw) return null
+    // 1) direct JSON
+    try { return JSON.parse(raw) } catch {}
+    // 2) code-fenced ```json ... ```
+    const fenceJson = /```json\s*([\s\S]*?)\s*```/i.exec(raw)
+    if (fenceJson && fenceJson[1]) {
+      const inner = fenceJson[1].trim()
+      try { return JSON.parse(inner) } catch {}
+    }
+    // 3) generic code fence ``` ... ```
+    const fence = /```\s*([\s\S]*?)\s*```/i.exec(raw)
+    if (fence && fence[1]) {
+      const inner = fence[1].trim()
+      try { return JSON.parse(inner) } catch {}
+    }
+    // 4) inline minimal match for our directive
+    const inline = /\{\s*"ui"\s*:\s*"jira_status"[\s\S]*?\}/i.exec(raw)
+    if (inline && inline[0]) {
+      try { return JSON.parse(inline[0]) } catch {}
+    }
+    return null
+  }
+
   const sendMessage = async () => {
     if (!input.trim() || loading) return
     const userMsg: Message = { role: 'user', content: input }
@@ -21,10 +49,10 @@ export default function ChatBox() {
     setLoading(true)
 
     try {
+      // Always forward to agent
       const url = new URL(`${API_BASE}/codinator/run-agent`)
       url.searchParams.set('agent_name', agentName)
-      url.searchParams.set('prompt', userMsg.content)
-
+      url.searchParams.set('prompt', userMsg.content || '')
       const res = await fetch(url.toString(), { method: 'POST' })
       let data: any = null
       try { data = await res.json() } catch {}
@@ -32,11 +60,36 @@ export default function ChatBox() {
         const errText = data?.detail || data?.error || `HTTP ${res.status}`
         throw new Error(errText)
       }
-      const assistantMsg: Message = {
-        role: 'assistant',
-        content: (data?.response && String(data.response).trim()) || 'No response from agent'
+      const raw = (data?.response && String(data.response).trim()) || ''
+
+      // Try to parse a structured UI directive (supports code fences)
+      const parsed: any = parseDirective(raw)
+
+      if (parsed && parsed.ui === 'jira_status' && typeof parsed.key === 'string') {
+        const jurl = new URL(`${API_BASE}/jira/issue-status`)
+        jurl.searchParams.set('key', parsed.key)
+        const jres = await fetch(jurl.toString())
+        let jdata: any = null
+        try { jdata = await jres.json() } catch {}
+        if (!jres.ok) {
+          const errText = jdata?.detail || jdata?.error || `HTTP ${jres.status}`
+          throw new Error(errText)
+        }
+        const uiData: JiraStatusData = {
+          key: jdata.key,
+          name: jdata.name ?? null,
+          expectedFinishDate: jdata.expectedFinishDate ?? null,
+          comments: Array.isArray(jdata.comments) ? jdata.comments : [],
+        }
+        const uiMsg: Message = { role: 'assistant', ui: { type: 'jira_status', data: uiData } }
+        setMessages((prev) => [...prev, uiMsg])
+      } else {
+        const assistantMsg: Message = {
+          role: 'assistant',
+          content: raw || 'No response from agent'
+        }
+        setMessages((prev) => [...prev, assistantMsg])
       }
-      setMessages((prev) => [...prev, assistantMsg])
     } catch (e: any) {
       setMessages((prev) => [
         ...prev,
@@ -155,7 +208,11 @@ export default function ChatBox() {
               ...(m.role === 'user' ? styles.user : m.role === 'assistant' ? styles.assistant : styles.system),
             }}
           >
-            {m.content}
+            {m.ui?.type === 'jira_status' ? (
+              <JiraStatus data={m.ui.data} />
+            ) : (
+              m.content
+            )}
           </div>
         ))}
       </div>
