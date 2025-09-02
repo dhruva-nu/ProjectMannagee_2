@@ -45,8 +45,8 @@ def list_repositories(organization: str) -> str:
         return f"An error occurred: {e}"
 
 # Expose as a sub-agent that can be used via AgentTool by the root agent
-github_agent = Agent(
-    name="github_agent",
+github_repo_agent = Agent(
+    name="github_repo_agent",
     model="gemini-2.0-flash",
     description="GitHub sub-agent that lists repositories and related metadata",
     instruction=(

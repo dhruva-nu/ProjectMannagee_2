@@ -2,9 +2,9 @@ import os
 from dotenv import load_dotenv
 from google.adk.agents import Agent
 from google.adk.tools.agent_tool import AgentTool
-from .sub_agents.jira_agent.agent import jira_agent
-from .sub_agents.github_agent.agent import github_agent
-from .sub_agents.cpa_agent.agent import cpa_agent
+from .sub_agents.jira_sprint_agent.agent import jira_sprint_agent
+from .sub_agents.github_repo_agent.agent import github_repo_agent
+from .sub_agents.jira_cpa_agent.agent import jira_cpa_agent
 
 load_dotenv()
 
@@ -21,10 +21,10 @@ For Jira:
 When using the 'list_repositories' tool, you must ask the user for the 'organization' as it is a required argument for that tool.
 When using the 'answer_jira_query' tool, you must ask the user for the 'issue_key' and the 'query' (e.g., "when can i expect TESTPROJ-10 to be complete" or "why is TESTPROJ-10 stuck") as they are required arguments for that tool.
     """,
-    sub_agents=[jira_agent, github_agent, cpa_agent],
+    sub_agents=[jira_sprint_agent, github_repo_agent, jira_cpa_agent],
     tools=[
-        AgentTool(jira_agent),
-        AgentTool(github_agent),
-        AgentTool(cpa_agent),
+        AgentTool(jira_sprint_agent),
+        AgentTool(github_repo_agent),
+        AgentTool(jira_cpa_agent),
     ]
 )

@@ -133,8 +133,8 @@ def answer_jira_query(issue_key: str, query: str) -> str:
         return "\n".join(fallback)
 
 # Expose as a sub-agent that can be used via AgentTool by the root agent
-cpa_agent = Agent(
-    name="cpa_agent",
+jira_cpa_agent = Agent(
+    name="jira_cpa_agent",
     model="gemini-2.0-flash",
     description="CPA sub-agent for answering Jira issue queries using context and project knowledge",
     instruction=(

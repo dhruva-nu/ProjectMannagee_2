@@ -212,8 +212,8 @@ def summarize_issues_in_sprint_v1(project_key: str, max_results: int = 50) -> st
 
 # Expose as a sub-agent that can be used via AgentTool by the root agent
 # This agent provides two tools: summarize_current_sprint and summarize_issues_in_sprint
-jira_agent = Agent(
-    name="jira_agent",
+jira_sprint_agent = Agent(
+    name="jira_sprint_agent",
     model="gemini-2.0-flash",
     description="Jira sub-agent handling sprint summaries and issue overviews",
     instruction=(
