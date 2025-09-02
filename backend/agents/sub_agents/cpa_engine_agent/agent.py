@@ -8,6 +8,7 @@ from backend.tools.cpa.engine_tools import (
     get_critical_path,
     get_task_slack,
     get_project_duration,
+    summarize_current_sprint_cpa,
 )
 
 load_dotenv()
@@ -27,6 +28,7 @@ cpa_engine_agent = Agent(
         FunctionTool(get_critical_path),
         FunctionTool(get_task_slack),
         FunctionTool(get_project_duration),
+        FunctionTool(summarize_current_sprint_cpa),
     ],
     sub_agents=[],
 )
