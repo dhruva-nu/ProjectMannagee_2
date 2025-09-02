@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import JiraStatus, { type JiraStatusData } from './JiraStatus'
+import SprintStatus, { type SprintStatusData } from './SprintStatus'
 
 type Message = {
   role: 'user' | 'assistant' | 'system'
   content?: string
-  ui?: { type: 'jira_status'; data: JiraStatusData }
+  ui?:
+    | { type: 'jira_status'; data: JiraStatusData }
+    | { type: 'sprint_status'; data: SprintStatusData }
 }
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000'
@@ -37,6 +40,11 @@ export default function ChatBox() {
     const inline = /\{\s*"ui"\s*:\s*"jira_status"[\s\S]*?\}/i.exec(raw)
     if (inline && inline[0]) {
       try { return JSON.parse(inline[0]) } catch {}
+    }
+    // 5) inline minimal match for sprint directive
+    const inlineSprint = /\{\s*"ui"\s*:\s*"sprint_status"[\s\S]*?\}/i.exec(raw)
+    if (inlineSprint && inlineSprint[0]) {
+      try { return JSON.parse(inlineSprint[0]) } catch {}
     }
     return null
   }
@@ -82,6 +90,24 @@ export default function ChatBox() {
           comments: Array.isArray(jdata.comments) ? jdata.comments : [],
         }
         const uiMsg: Message = { role: 'assistant', ui: { type: 'jira_status', data: uiData } }
+        setMessages((prev) => [...prev, uiMsg])
+      } else if (parsed && parsed.ui === 'sprint_status' && typeof parsed.project_key === 'string') {
+        const surl = new URL(`${API_BASE}/jira/sprint-status`)
+        surl.searchParams.set('project_key', parsed.project_key)
+        const sres = await fetch(surl.toString())
+        let sdata: any = null
+        try { sdata = await sres.json() } catch {}
+        if (!sres.ok) {
+          const errText = sdata?.detail || sdata?.error || `HTTP ${sres.status}`
+          throw new Error(errText)
+        }
+        const uiData: SprintStatusData = {
+          name: sdata.name ?? null,
+          startDate: sdata.startDate ?? null,
+          endDate: sdata.endDate ?? null,
+          notes: Array.isArray(sdata.notes) ? sdata.notes : [],
+        }
+        const uiMsg: Message = { role: 'assistant', ui: { type: 'sprint_status', data: uiData } }
         setMessages((prev) => [...prev, uiMsg])
       } else {
         const assistantMsg: Message = {
@@ -210,6 +236,8 @@ export default function ChatBox() {
           >
             {m.ui?.type === 'jira_status' ? (
               <JiraStatus data={m.ui.data} />
+            ) : m.ui?.type === 'sprint_status' ? (
+              <SprintStatus data={m.ui.data} />
             ) : (
               m.content
             )}

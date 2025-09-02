@@ -13,6 +13,7 @@ from .agents.agent import agent
 import os
 import requests
 from requests.auth import HTTPBasicAuth
+from backend.tools.jira.sprint_tools import _fetch_active_sprint
 
 app = FastAPI()
 
@@ -172,6 +173,30 @@ async def jira_issue_status(key: str = Query(..., description="Jira issue key, e
         raise
     except Exception as e:
         logging.exception("/jira/issue-status failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/jira/sprint-status")
+async def jira_sprint_status(project_key: str = Query(..., description="Jira project key, e.g., PROJ")):
+    """
+    Return the current active sprint details for a given Jira project key.
+    Response includes: name, startDate, endDate, and optional notes.
+    """
+    try:
+        # Ensure env loaded (when running as a script)
+        load_dotenv(dotenv_path=(Path(__file__).parent / ".env"))
+        sprint = _fetch_active_sprint(project_key)
+        if not sprint:
+            raise HTTPException(status_code=404, detail=f"No active sprint found for project {project_key}")
+        return {
+            "name": sprint.get("name"),
+            "startDate": sprint.get("startDate"),
+            "endDate": sprint.get("endDate"),
+            "notes": [],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("/jira/sprint-status failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
