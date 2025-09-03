@@ -801,13 +801,7 @@ def estimate_issue_completion_in_current_sprint(
     done_tasks = [t for t in tasks_for_assignee if t.get("is_done")]
     pending_tasks = [t for t in tasks_for_assignee if not t.get("is_done")]
 
-    for t in done_tasks:
-        sdt = current
-        edt = _advance_working_days(sdt, t["estimated_days"], working_days_set, user_holidays)
-        current = edt + timedelta(days=1)
-        # We still record completion for the target issue if it is already Done
-        if t.get("key") == issue_key:
-            per_issue_completion[t["key"]] = edt.isoformat()
+    
 
     for t in pending_tasks:
         sdt = current
