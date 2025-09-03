@@ -20,6 +20,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.db.database import get_db
 from jose import jwt, JWTError
+import re
+import time
 
 app = FastAPI()
 
@@ -69,6 +71,27 @@ app.add_middleware(
 SECRET_KEY = os.getenv("JWT_SECRET", "dev-secret-change-me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+
+# Simple in-memory cache for Jira issue status to reduce repeated calls
+_ISSUE_STATUS_CACHE: dict[str, tuple[float, dict]] = {}
+_ISSUE_STATUS_TTL_SECONDS = int(os.getenv("ISSUE_STATUS_TTL_SECONDS", "30"))
+
+def _cache_get_issue_status(key: str) -> dict | None:
+    try:
+        ts, data = _ISSUE_STATUS_CACHE.get(key, (0.0, None))
+        if data is None:
+            return None
+        if (time.time() - ts) < _ISSUE_STATUS_TTL_SECONDS:
+            return data
+    except Exception:
+        pass
+    return None
+
+def _cache_put_issue_status(key: str, data: dict) -> None:
+    try:
+        _ISSUE_STATUS_CACHE[key] = (time.time(), data)
+    except Exception:
+        pass
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
@@ -173,6 +196,8 @@ async def run_codinator_agent(
     """
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("api")
+    session_id: str | None = None
+    user_id: str | None = None
     try:
         # Generate a unique session_id for each request.
         # Note: In a real app, you'd want to manage sessions more robustly.
@@ -185,6 +210,19 @@ async def run_codinator_agent(
         effective_prompt = prompt or (request.prompt if request else None)
         if not effective_prompt or not effective_prompt.strip():
             raise HTTPException(status_code=422, detail="Missing 'prompt'. Provide it in JSON body or as query param ?prompt=")
+
+        # Lightweight pre-router: handle simple Jira status queries locally to avoid LLM/tool calls
+        # Patterns like: "what is the status of issue ABC-123" or "jira status for ABC-123"
+        if effective_prompt:
+            prompt_lc = effective_prompt.lower()
+            # Extract a plausible JIRA key (prefix-num)
+            m = re.search(r"\b([A-Z][A-Z0-9]+-\d+)\b", effective_prompt, flags=re.IGNORECASE)
+            if m and ("status" in prompt_lc) and ("issue" in prompt_lc or "jira" in prompt_lc):
+                issue_key = m.group(1)
+                # Return the UI directive directly as specified by core agent instructions
+                ui_json = f"{{\"ui\": \"jira_status\", \"key\": \"{issue_key}\"}}"
+                logging.getLogger("api").info("/codinator/run-agent pre-router handled jira status for %s", issue_key)
+                return {"response": ui_json}
 
         message = genai_types.Content(role="user", parts=[genai_types.Part(text=effective_prompt)])
 
@@ -216,6 +254,14 @@ async def run_codinator_agent(
     except Exception as e:
         logger.exception("/codinator/run-agent failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Delete the in-memory session so prior chat turns are not retained
+        try:
+            if session_id and user_id:
+                session_service.delete_session(app_name=runner.app_name, user_id=user_id, session_id=session_id)
+        except Exception:
+            # Best-effort cleanup; do not block response on cleanup failures
+            pass
 
 @app.get("/jira/issue-status")
 async def jira_issue_status(key: str = Query(..., description="Jira issue key, e.g., PROJ-123"), current_user: User = Depends(get_current_user)):
@@ -237,6 +283,10 @@ async def jira_issue_status(key: str = Query(..., description="Jira issue key, e
     headers = {"Accept": "application/json"}
 
     try:
+        # Serve from cache if fresh
+        cached = _cache_get_issue_status(key)
+        if cached is not None:
+            return cached
         # Fetch issue with selected fields and expanded comments
         url = f"{jira_server}/rest/api/3/issue/{key}"
         params = {"fields": "summary,duedate,comment"}
@@ -274,12 +324,14 @@ async def jira_issue_status(key: str = Query(..., description="Jira issue key, e
                 body_text = str(body)
             normalized_comments.append(f"{author}: {body_text}")
 
-        return {
+        result = {
             "key": key,
             "name": summary,
             "expectedFinishDate": duedate,
             "comments": normalized_comments,
         }
+        _cache_put_issue_status(key, result)
+        return result
     except HTTPException:
         raise
     except Exception as e:
