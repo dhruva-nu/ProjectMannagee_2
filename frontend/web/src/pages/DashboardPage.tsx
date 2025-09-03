@@ -43,7 +43,7 @@ const DashboardPage: React.FC = () => {
           {latestUi.type === 'jira_status' ? (
             <JiraStatus key={animationKey} data={latestUi.data} />
           ) : latestUi.type === 'sprint_status' ? (
-            <SprintStatus data={latestUi.data} />
+            <SprintStatus key={animationKey} data={latestUi.data} />
           ) : null}
         </div>
       )}

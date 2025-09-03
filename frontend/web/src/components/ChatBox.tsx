@@ -30,6 +30,17 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
   const [loading, setLoading] = useState(false)
   const [agentName, setAgentName] = useState('codinator')
 
+  // Extract project key from free-form user text.
+  // Matches: "@TESTPROJ" or "project TESTPROJ" (keys are typically A-Z, 0-9, dash/underscore)
+  const extractProjectKey = (text: string): string | null => {
+    if (!text) return null
+    const atMatch = /@([A-Z0-9_\-]+)/i.exec(text)
+    if (atMatch && atMatch[1]) return atMatch[1].toUpperCase()
+    const projMatch = /project\s+([A-Z0-9_\-]+)/i.exec(text)
+    if (projMatch && projMatch[1]) return projMatch[1].toUpperCase()
+    return null
+  }
+
   // Try to parse a UI directive from raw model text.
   // Supports plain JSON, ```json fenced blocks, ``` fenced blocks, and inline objects.
   const parseDirective = (raw: string): any | null => {
@@ -127,6 +138,8 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
           startDate: sdata.startDate ?? null,
           endDate: sdata.endDate ?? null,
           notes: Array.isArray(sdata.notes) ? sdata.notes : [],
+          totalIssues: typeof sdata.totalIssues === 'number' ? sdata.totalIssues : undefined,
+          completedIssues: typeof sdata.completedIssues === 'number' ? sdata.completedIssues : undefined,
         }
         const ui: ChatUiMessage = { type: 'sprint_status', data: uiData }
         const uiMsg: Message = { role: 'assistant', ui }
@@ -179,6 +192,8 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
             startDate: sdata.startDate ?? null,
             endDate: sdata.endDate ?? null,
             notes: Array.isArray(sdata.notes) ? sdata.notes : [],
+            totalIssues: typeof sdata.totalIssues === 'number' ? sdata.totalIssues : undefined,
+            completedIssues: typeof sdata.completedIssues === 'number' ? sdata.completedIssues : undefined,
           }
           const ui: ChatUiMessage = { type: 'sprint_status', data: uiData }
           const uiMsg: Message = { role: 'assistant', ui }
@@ -190,6 +205,35 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
             content: raw || 'No response from agent'
           }
           setMessages((prev) => [...prev, assistantMsg])
+
+          // Client-side heuristic: if user asked about a specific project, proactively fetch sprint status
+          const maybeKey = extractProjectKey(userMsg.content || '')
+          if (maybeKey) {
+            try {
+              const surl = new URL(`${API_BASE}/jira/sprint-status`)
+              surl.searchParams.set('project_key', maybeKey)
+              const token = localStorage.getItem('access_token')
+              const sres = await fetch(surl.toString(), {
+                headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+              })
+              let sdata: any = null
+              try { sdata = await sres.json() } catch {}
+              if (sres.ok) {
+                const uiData: SprintStatusData = {
+                  name: sdata.name ?? null,
+                  startDate: sdata.startDate ?? null,
+                  endDate: sdata.endDate ?? null,
+                  notes: Array.isArray(sdata.notes) ? sdata.notes : [],
+                  totalIssues: typeof sdata.totalIssues === 'number' ? sdata.totalIssues : undefined,
+                  completedIssues: typeof sdata.completedIssues === 'number' ? sdata.completedIssues : undefined,
+                }
+                const ui: ChatUiMessage = { type: 'sprint_status', data: uiData }
+                const uiMsg: Message = { role: 'assistant', ui }
+                setMessages((prev) => [...prev, uiMsg])
+                onUiMessage?.(ui)
+              }
+            } catch {}
+          }
         }
       }
     } catch (e: any) {

@@ -13,7 +13,7 @@ from agents.agent import agent
 import os
 import requests
 from requests.auth import HTTPBasicAuth
-from tools.jira.sprint_tools import _fetch_active_sprint
+from tools.jira.sprint_tools import _fetch_active_sprint, _fetch_issues_in_active_sprint
 from fastapi import Depends, status, Header
 from passlib.hash import bcrypt
 from sqlalchemy.orm import Session
@@ -351,11 +351,25 @@ async def jira_sprint_status(project_key: str = Query(..., description="Jira pro
         sprint = _fetch_active_sprint(project_key)
         if not sprint:
             raise HTTPException(status_code=404, detail=f"No active sprint found for project {project_key}")
+        data, err = _fetch_issues_in_active_sprint(project_key)
+        if err:
+            raise HTTPException(status_code=500, detail=err)
+        if isinstance(data, str): # Should not happen if err is handled
+            raise HTTPException(status_code=500, detail=data)
+
+        sprint_info = data.get("sprint", {})
+        issues = data.get("issues", [])
+
+        total_issues = len(issues)
+        completed_issues = sum(1 for issue in issues if issue.get("status") == "Done") # Assuming "Done" is the completed status
+
         return {
-            "name": sprint.get("name"),
-            "startDate": sprint.get("startDate"),
-            "endDate": sprint.get("endDate"),
-            "notes": [],
+            "name": sprint_info.get("name"),
+            "startDate": sprint_info.get("startDate"),
+            "endDate": sprint_info.get("endDate"),
+            "notes": [], # Notes are not currently fetched by _fetch_issues_in_active_sprint
+            "totalIssues": total_issues,
+            "completedIssues": completed_issues,
         }
     except HTTPException:
         raise
