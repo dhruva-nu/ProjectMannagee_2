@@ -102,6 +102,7 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
           key: jdata.key,
           name: jdata.name ?? null,
           expectedFinishDate: jdata.expectedFinishDate ?? null,
+          status: jdata.status ?? null,
           comments: Array.isArray(jdata.comments) ? jdata.comments : [],
         }
         const ui: ChatUiMessage = { type: 'jira_status', data: uiData }
@@ -153,6 +154,7 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
             key: jdata.key,
             name: jdata.name ?? null,
             expectedFinishDate: jdata.expectedFinishDate ?? null,
+            status: jdata.status ?? null,
             comments: Array.isArray(jdata.comments) ? jdata.comments : [],
           }
           const ui: ChatUiMessage = { type: 'jira_status', data: uiData }

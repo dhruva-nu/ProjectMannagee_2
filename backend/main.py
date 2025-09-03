@@ -288,7 +288,7 @@ async def jira_issue_status(key: str = Query(..., description="Jira issue key, e
             return cached
         # Fetch issue with selected fields and expanded comments
         url = f"{jira_server}/rest/api/3/issue/{key}"
-        params = {"fields": "summary,duedate,comment"}
+        params = {"fields": "summary,duedate,comment,status"}
         resp = requests.get(url, headers=headers, auth=auth, params=params)
         if resp.status_code == 404:
             raise HTTPException(status_code=404, detail=f"Issue {key} not found")
@@ -299,6 +299,7 @@ async def jira_issue_status(key: str = Query(..., description="Jira issue key, e
         fields = data.get("fields", {})
         summary = fields.get("summary")
         duedate = fields.get("duedate")  # ISO date or None
+        status = fields.get("status", {}).get("name")
         comments_block = fields.get("comment") or {}
         comments = comments_block.get("comments", [])
 
@@ -327,6 +328,7 @@ async def jira_issue_status(key: str = Query(..., description="Jira issue key, e
             "key": key,
             "name": summary,
             "expectedFinishDate": duedate,
+            "status": status,
             "comments": normalized_comments,
         }
         _cache_put_issue_status(key, result)
