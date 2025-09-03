@@ -219,10 +219,9 @@ async def run_codinator_agent(
             m = re.search(r"\b([A-Z][A-Z0-9]+-\d+)\b", effective_prompt, flags=re.IGNORECASE)
             if m and ("status" in prompt_lc) and ("issue" in prompt_lc or "jira" in prompt_lc):
                 issue_key = m.group(1)
-                # Return the UI directive directly as specified by core agent instructions
-                ui_json = f"{{\"ui\": \"jira_status\", \"key\": \"{issue_key}\"}}"
+                # Return a structured UI directive for the frontend to consume directly
                 logging.getLogger("api").info("/codinator/run-agent pre-router handled jira status for %s", issue_key)
-                return {"response": ui_json}
+                return {"ui": "jira_status", "key": issue_key}
 
         message = genai_types.Content(role="user", parts=[genai_types.Part(text=effective_prompt)])
 

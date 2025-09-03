@@ -17,7 +17,14 @@ export type ChatBoxHandle = {
   insertText: (text: string) => void
 }
 
-const ChatBox = forwardRef<ChatBoxHandle>(function ChatBox(_, ref) {
+export type ChatUiMessage =
+  | { type: 'jira_status'; data: JiraStatusData }
+  | { type: 'sprint_status'; data: SprintStatusData }
+
+const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) => void }>(function ChatBox(
+  { onUiMessage },
+  ref,
+) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -76,14 +83,11 @@ const ChatBox = forwardRef<ChatBoxHandle>(function ChatBox(_, ref) {
         const errText = data?.detail || data?.error || `HTTP ${res.status}`
         throw new Error(errText)
       }
-      const raw = (data?.response && String(data.response).trim()) || ''
 
-      // Try to parse a structured UI directive (supports code fences)
-      const parsed: any = parseDirective(raw)
-
-      if (parsed && parsed.ui === 'jira_status' && typeof parsed.key === 'string') {
+      // 1) Prefer structured UI directives from backend
+      if (data && data.ui === 'jira_status' && typeof data.key === 'string') {
         const jurl = new URL(`${API_BASE}/jira/issue-status`)
-        jurl.searchParams.set('key', parsed.key)
+        jurl.searchParams.set('key', data.key)
         const token = localStorage.getItem('access_token')
         const jres = await fetch(jurl.toString(), {
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -100,11 +104,13 @@ const ChatBox = forwardRef<ChatBoxHandle>(function ChatBox(_, ref) {
           expectedFinishDate: jdata.expectedFinishDate ?? null,
           comments: Array.isArray(jdata.comments) ? jdata.comments : [],
         }
-        const uiMsg: Message = { role: 'assistant', ui: { type: 'jira_status', data: uiData } }
+        const ui: ChatUiMessage = { type: 'jira_status', data: uiData }
+        const uiMsg: Message = { role: 'assistant', ui }
         setMessages((prev) => [...prev, uiMsg])
-      } else if (parsed && parsed.ui === 'sprint_status' && typeof parsed.project_key === 'string') {
+        onUiMessage?.(ui)
+      } else if (data && data.ui === 'sprint_status' && typeof data.project_key === 'string') {
         const surl = new URL(`${API_BASE}/jira/sprint-status`)
-        surl.searchParams.set('project_key', parsed.project_key)
+        surl.searchParams.set('project_key', data.project_key)
         const token = localStorage.getItem('access_token')
         const sres = await fetch(surl.toString(), {
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -121,14 +127,68 @@ const ChatBox = forwardRef<ChatBoxHandle>(function ChatBox(_, ref) {
           endDate: sdata.endDate ?? null,
           notes: Array.isArray(sdata.notes) ? sdata.notes : [],
         }
-        const uiMsg: Message = { role: 'assistant', ui: { type: 'sprint_status', data: uiData } }
+        const ui: ChatUiMessage = { type: 'sprint_status', data: uiData }
+        const uiMsg: Message = { role: 'assistant', ui }
         setMessages((prev) => [...prev, uiMsg])
+        onUiMessage?.(ui)
       } else {
-        const assistantMsg: Message = {
-          role: 'assistant',
-          content: raw || 'No response from agent'
+        // 2) Fallback to text response and client-side parsing (legacy)
+        const raw = (data?.response && String(data.response).trim()) || ''
+        const parsed: any = parseDirective(raw)
+
+        if (parsed && parsed.ui === 'jira_status' && typeof parsed.key === 'string') {
+          const jurl = new URL(`${API_BASE}/jira/issue-status`)
+          jurl.searchParams.set('key', parsed.key)
+          const token = localStorage.getItem('access_token')
+          const jres = await fetch(jurl.toString(), {
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          })
+          let jdata: any = null
+          try { jdata = await jres.json() } catch {}
+          if (!jres.ok) {
+            const errText = jdata?.detail || jdata?.error || `HTTP ${jres.status}`
+            throw new Error(errText)
+          }
+          const uiData: JiraStatusData = {
+            key: jdata.key,
+            name: jdata.name ?? null,
+            expectedFinishDate: jdata.expectedFinishDate ?? null,
+            comments: Array.isArray(jdata.comments) ? jdata.comments : [],
+          }
+          const ui: ChatUiMessage = { type: 'jira_status', data: uiData }
+          const uiMsg: Message = { role: 'assistant', ui }
+          setMessages((prev) => [...prev, uiMsg])
+          onUiMessage?.(ui)
+        } else if (parsed && parsed.ui === 'sprint_status' && typeof parsed.project_key === 'string') {
+          const surl = new URL(`${API_BASE}/jira/sprint-status`)
+          surl.searchParams.set('project_key', parsed.project_key)
+          const token = localStorage.getItem('access_token')
+          const sres = await fetch(surl.toString(), {
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          })
+          let sdata: any = null
+          try { sdata = await sres.json() } catch {}
+          if (!sres.ok) {
+            const errText = sdata?.detail || sdata?.error || `HTTP ${sres.status}`
+            throw new Error(errText)
+          }
+          const uiData: SprintStatusData = {
+            name: sdata.name ?? null,
+            startDate: sdata.startDate ?? null,
+            endDate: sdata.endDate ?? null,
+            notes: Array.isArray(sdata.notes) ? sdata.notes : [],
+          }
+          const ui: ChatUiMessage = { type: 'sprint_status', data: uiData }
+          const uiMsg: Message = { role: 'assistant', ui }
+          setMessages((prev) => [...prev, uiMsg])
+          onUiMessage?.(ui)
+        } else {
+          const assistantMsg: Message = {
+            role: 'assistant',
+            content: raw || 'No response from agent'
+          }
+          setMessages((prev) => [...prev, assistantMsg])
         }
-        setMessages((prev) => [...prev, assistantMsg])
       }
     } catch (e: any) {
       setMessages((prev) => [
