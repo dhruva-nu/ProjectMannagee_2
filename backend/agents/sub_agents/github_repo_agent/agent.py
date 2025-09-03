@@ -1,6 +1,6 @@
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
-from backend.tools.github.repo_tools import list_repositories
+from tools.github.repo_tools import list_repositories
 
 # Expose as a sub-agent that can be used via AgentTool by the root agent
 github_repo_agent = Agent(

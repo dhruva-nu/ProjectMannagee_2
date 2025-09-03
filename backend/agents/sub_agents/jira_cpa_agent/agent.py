@@ -1,8 +1,8 @@
-import json
+
 from dotenv import load_dotenv
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
-from backend.tools.jira.cpa_tools import (
+from tools.jira.cpa_tools import (
     answer_jira_query,
     what_is_blocking,
     answer_sprint_hypothetical,

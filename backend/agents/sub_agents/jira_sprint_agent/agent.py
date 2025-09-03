@@ -1,13 +1,13 @@
 jira_agent = None  # forward-declare for linting; actual instance is below
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
-from backend.tools.jira.sprint_tools import (
+from tools.jira.sprint_tools import (
     summarize_current_sprint_v1,
     summarize_issues_in_sprint_v1,
     summarize_current_sprint_default,
     summarize_issues_in_sprint_default,
 )
-from backend.tools.jira.user_issues_tools import get_issues_assigned_to_user
+from tools.jira.user_issues_tools import get_issues_assigned_to_user
 
 
 """

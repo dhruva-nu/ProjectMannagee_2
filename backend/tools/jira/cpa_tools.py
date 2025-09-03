@@ -31,7 +31,10 @@ def _jira_env():
 
 def _sp_field_key() -> str | None:
     """Return the Jira custom field key for Story Points, e.g., 'customfield_10016'. Config via JIRA_STORY_POINTS_FIELD."""
-    return os.getenv("JIRA_STORY_POINTS_FIELD")
+    key = os.getenv("JIRA_STORY_POINTS_FIELD")
+    # Fallback to a common default if not configured. This is the default SP field in many Jira Cloud instances.
+    # If your instance uses a different key, set JIRA_STORY_POINTS_FIELD in backend/.env.
+    return key or "customfield_10016"
 
 
 def _fetch_issue_details(issue_key: str) -> dict | None:

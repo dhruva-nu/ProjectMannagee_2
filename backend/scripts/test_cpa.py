@@ -1,10 +1,16 @@
 import json
+import sys
+import os
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from backend.tools.cpa.engine_tools import (
     refresh_from_jira,
     run_cpa,
     get_critical_path,
     get_task_slack,
     get_project_duration,
+    current_sprint_cpa_timeline,
+    estimate_issue_completion_in_current_sprint,
 )
 
 PROJECT_KEY = "TESTPROJ"
@@ -36,6 +42,15 @@ def main():
     print("\n=== get_project_duration ===")
     dur = get_project_duration(pid)
     print(json.dumps(dur, indent=2))
+
+    print("\n=== current_sprint_cpa_timeline ===")
+    sprint = current_sprint_cpa_timeline(PROJECT_KEY)
+    print(json.dumps(sprint, indent=2))
+
+    target = TASKS[-1]
+    print("\n=== estimate_issue_completion_in_current_sprint ===")
+    eta = estimate_issue_completion_in_current_sprint(PROJECT_KEY, target)
+    print(json.dumps(eta, indent=2))
 
 
 if __name__ == "__main__":

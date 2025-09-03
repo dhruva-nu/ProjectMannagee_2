@@ -9,17 +9,16 @@ from pathlib import Path
 import anyio
 import logging
 from datetime import datetime, timedelta, timezone
-import re
-from .agents.agent import agent
+from agents.agent import agent
 import os
 import requests
 from requests.auth import HTTPBasicAuth
-from backend.tools.jira.sprint_tools import _fetch_active_sprint
+from tools.jira.sprint_tools import _fetch_active_sprint
 from fastapi import Depends, status, Header
 from passlib.hash import bcrypt
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from backend.app.db.database import get_db
+from app.db.database import get_db
 from jose import jwt, JWTError
 
 app = FastAPI()
