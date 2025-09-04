@@ -310,32 +310,33 @@ def answer_sprint_hypothetical(project_key: str, issue_key: str, query: str) -> 
 
 
 def who_is_assigned(issue_key: str) -> dict:
-    """Returns the assignee display name (or 'unassigned') for the given issue."""
+    """Returns the assignee information for the given issue."""
     load_dotenv()
     details = _fetch_issue_details(issue_key)
     if not details:
-        return {"response": f"Could not find details for Jira issue {issue_key}."}
+        return {"error": f"Could not find details for Jira issue {issue_key}."}
 
     assignee_data = details.get("assignee")
     if not assignee_data or not assignee_data.get("displayName"):
-        return {"response": f"Issue {issue_key} is unassigned."}
+        return {"unassigned": True, "issue_key": issue_key}
 
     display_name = assignee_data.get("displayName")
     email_address = assignee_data.get("emailAddress")
     avatar_urls = assignee_data.get("avatarUrls")
+    account_id = assignee_data.get("accountId")
 
     # Prioritize 48x48, then 32x32, then any available
     avatar_url = None
     if avatar_urls:
         avatar_url = avatar_urls.get("48x48") or avatar_urls.get("32x32") or next(iter(avatar_urls.values()), None)
 
-    user_card_data = {
-        "name": display_name,
-        "email": email_address,
+    return {
+        "displayName": display_name,
+        "emailAddress": email_address,
         "avatarUrl": avatar_url,
-        # You can add 'designation' or 'online' if you have a way to fetch them
+        "accountId": account_id,
+        "issue_key": issue_key
     }
-    return {"ui": "user_card", "data": user_card_data}
 
 def transition_issue_status(issue_key: str, new_status: str) -> str:
     """

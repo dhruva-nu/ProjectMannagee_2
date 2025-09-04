@@ -7,7 +7,7 @@ from .cpa import (
     summarize_current_sprint_cpa,
     essential_keys,
 )
-from .jira import refresh_from_jira
+from .jira import refresh_from_jira, refresh_sprint_from_jira
 from .project_graph import (
     build_weighted_dependency_graph,
     format_dependency_graph,
@@ -28,6 +28,7 @@ from .sprint_timeline import (
 
 __all__ = [
     "refresh_from_jira",
+    "refresh_sprint_from_jira",
     "run_cpa",
     "get_critical_path",
     "get_task_slack",

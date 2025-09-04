@@ -7,6 +7,7 @@ from .sub_agents.jira_agent.agent import jira_agent
 from .sub_agents.github_repo_agent.agent import github_repo_agent
 from .sub_agents.jira_cpa_agent.agent import jira_cpa_agent
 from .sub_agents.cpa_engine_agent.agent import cpa_engine_agent
+from .sub_agents.formatter_agent.agent import formatter_agent
 
 load_dotenv()
 
@@ -39,23 +40,21 @@ When using the 'answer_jira_query' tool, you must ask the user for the 'issue_ke
  For assignee lookups, call the direct tool 'who_is_assigned(issue_key)' and return its JSON only. For blockers, use jira_cpa_agent's 'what_is_blocking(issue_key)'.
 
  For a concise Critical Path Analysis summary of the current sprint for a Jira project, call cpa_engine_agent's 'summarize_current_sprint_cpa(project_key)'. If the user doesn't provide project_key, ask for it explicitly.
- For ETA prompts like "When can I expect <ISSUE-KEY> will be done?", call cpa_engine_agent's 'estimate_issue_eta_days(issue_key)'. Respond ONLY with the tool's JSON (which includes optimistic and pessimistic days), no prose.
- For queries about issues assigned to a specific user (e.g., "how many tasks do I have assigned?", "show me issues assigned to USER_A"), use jira_sprint_agent's 'get_issues_assigned_to_user(username)' tool. The response should be a JSON object in the format: {"ui": "issue_list", "data": {"title": "<title_string>", "issues": [{"key": "<issue_key>", "summary": "<summary_string>", "status": "<status_string>", "priority": "<priority_string>", "url": "<url_string>"}, ...]}}.
+ For ETA prompts like "When can I expect <ISSUE-KEY> will be done?", call cpa_engine_agent's 'estimate_issue_eta_days(issue_key)', then pass the result to formatter_agent for proper UI formatting.
+ For queries about issues assigned to a specific user (e.g., "how many tasks do I have assigned?", "show me issues assigned to USER_A"), use jira_sprint_agent's 'get_issues_assigned_to_user(username)' tool, then pass the raw result to formatter_agent for proper UI formatting.
  To change the status of a Jira issue, use jira_cpa_agent's 'transition_issue_status(issue_key, new_status)' tool. You must ask the user for the 'issue_key' and the 'new_status'.
  To add a comment to a Jira issue, use jira_cpa_agent's 'add_comment_to_issue(issue_key, comment_body)' tool. You must ask the user for the 'issue_key' and the 'comment_body'.
 
  For questions like "in the current sprint for issue <ISSUE-KEY> when can I expect it done?", prefer cpa_engine_agent and call 'estimate_issue_eta_days(issue_key)'. If the user asked for a dependency view, then route to jira_cpa_agent and call 'print_issue_dependency_graph(issue_key)'.
- - Return the tool's JSON directly in either case.
+ - Pass the tool's output to formatter_agent for proper UI formatting.
 
  Generative UI directive:
- - When the user asks for the Jira status for a specific issue (e.g., "JIRA status for issue PROJ-123"), respond ONLY with a single-line JSON object, no prose, in the exact format:
-   {"ui": "jira_status", "key": "PROJ-123"}
- - When the user asks who is assigned to a specific issue (e.g., "who is assigned TESTPROJ-16", "assignee for PROJ-123"), call the direct 'who_is_assigned(issue_key)' tool and respond ONLY with the tool's JSON output, no prose. Do not call any other tools or sub-agents for this intent.
- - When the user asks for the list of Jira issues in the current sprint (e.g., "JIRA issues in the current sprint"), respond ONLY with a single-line JSON object, no prose, in the exact format:
-   {"ui": "issue_list", "data": <output_of_get_issues_assigned_to_user>}
+ - When the user asks for the Jira status for a specific issue (e.g., "JIRA status for issue PROJ-123"), use formatter_agent's 'format_jira_status(issue_key)' tool to generate the proper UI response.
+ - When the user asks who is assigned to a specific issue (e.g., "who is assigned TESTPROJ-16", "assignee for PROJ-123"), call the direct 'who_is_assigned(issue_key)' tool, then pass the result to formatter_agent for proper UI formatting.
+ - When the user asks for the list of Jira issues in the current sprint (e.g., "JIRA issues in the current sprint"), get the raw data from appropriate tools, then use formatter_agent to format the response properly.
  - Do not include analysis or extra text around the JSON. If the issue key is unclear, ask a clarifying question in plain text.
     """,
-    sub_agents=[jira_agent, github_repo_agent, jira_cpa_agent, cpa_engine_agent],
+    sub_agents=[jira_agent, github_repo_agent, jira_cpa_agent, cpa_engine_agent, formatter_agent],
     tools=[
         # Prefer direct tool for assignee lookups to avoid free-text answers
         FunctionTool(who_is_assigned),
@@ -63,5 +62,6 @@ When using the 'answer_jira_query' tool, you must ask the user for the 'issue_ke
         AgentTool(github_repo_agent),
         AgentTool(jira_cpa_agent),
         AgentTool(cpa_engine_agent),
+        AgentTool(formatter_agent),
     ]
 )

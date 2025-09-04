@@ -235,7 +235,51 @@ def refresh_from_jira(project_key: str) -> dict:
                 SELECT id FROM tasks WHERE id = :id
             """), {"id": key}).fetchone()
             _upsert_task(db, project_id, key, name, est_duration, assignee, duedate)
-            _replace_dependencies(db, key, deps)
+            _replace_dependencies(db, project_id, key, deps)
+            if existing:
+                updated += 1
+            else:
+                inserted += 1
+        db.commit()
+        return {
+            "project_id": project_id,
+            "project_key": project_key,
+            "issue_count": len(issues),
+            "inserted": inserted,
+            "updated": updated,
+        }
+    finally:
+        db.close()
+
+def refresh_sprint_from_jira(project_key: str) -> dict:
+    """Sync latest Jira issues for a project's current sprint into the DB.
+    Returns JSON: {"project_id", "project_key", "issue_count", "inserted": n, "updated": m}
+    """
+    issues = _cached_current_sprint_issues(project_key)
+    db = SessionLocal()
+    try:
+        project_id = _ensure_project(db, project_key)
+        inserted = 0
+        updated = 0
+        for issue in issues:
+            key = issue.get("key")
+            fields = issue.get("fields", {})
+            name = fields.get("summary")
+            assignee = (fields.get("assignee") or {}).get("displayName") if fields.get("assignee") else None
+            duedate = fields.get("duedate")
+            est_duration = _get_task_duration(fields)
+            deps = _parse_dependencies(fields)
+
+            # Try upsert user
+            if assignee:
+                _upsert_user(db, assignee)
+
+            # Determine if task exists
+            existing = db.execute(text("""
+                SELECT id FROM tasks WHERE id = :id
+            """), {"id": key}).fetchone()
+            _upsert_task(db, project_id, key, name, est_duration, assignee, duedate)
+            _replace_dependencies(db, project_id, key, deps)
             if existing:
                 updated += 1
             else:

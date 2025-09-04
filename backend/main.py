@@ -304,6 +304,28 @@ async def run_codinator_agent(
                 eta = compute_eta_range_for_issue_current_sprint(project_key=project_key, issue_key=issue_key)
                 return eta
 
+            # Handle: sprint completion if removing an issue
+            # e.g., "if I remove issue TESTPROJ-12, when can I expect to complete the sprint"
+            if issue_key and ("remove" in prompt_lc or "exclude" in prompt_lc) and ("sprint" in prompt_lc) and ("complete" in prompt_lc or "finish" in prompt_lc or "expect" in prompt_lc):
+                try:
+                    try:
+                        from tools.cpa.engine.sprint_timeline import sprint_completion_if_issue_removed
+                    except ModuleNotFoundError:
+                        from backend.tools.cpa.engine.sprint_timeline import sprint_completion_if_issue_removed
+                    project_key = issue_key.split('-', 1)[0] if '-' in issue_key else None
+                    if not project_key:
+                        raise HTTPException(status_code=422, detail="Could not infer project_key from issue_key")
+                    logging.getLogger("api").info("/codinator/run-agent pre-router handled sprint removal impact for %s", issue_key)
+                    result = sprint_completion_if_issue_removed(project_key=project_key, removed_issue_key=issue_key)
+                    # Return as UI directive type for consistency
+                    result["ui"] = "sprint_removal_impact"
+                    return result
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    logging.getLogger("api").exception("sprint removal impact failed: %s", e)
+                    # Fall through to full agent if error
+
         message = genai_types.Content(role="user", parts=[genai_types.Part(text=effective_prompt)])
 
         final_response = ""
@@ -381,6 +403,33 @@ async def run_codinator_agent(
         raise
     except Exception as e:
         logger.exception("/codinator/run-agent failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/jira/sprint-completion-if-removed")
+async def jira_sprint_completion_if_removed(
+    issue_key: str = Query(..., description="Jira issue key to remove, e.g., PROJ-123"),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns the sprint completion date before and after removing the specified issue from the current sprint,
+    along with the delta in days (positive means the sprint finishes earlier).
+    """
+    try:
+        # Import locally to avoid circular imports
+        try:
+            from tools.cpa.engine.sprint_timeline import sprint_completion_if_issue_removed
+        except ModuleNotFoundError:
+            from backend.tools.cpa.engine.sprint_timeline import sprint_completion_if_issue_removed
+
+        if not issue_key or '-' not in issue_key:
+            raise HTTPException(status_code=422, detail="Please provide a valid Jira issue key, e.g., PROJ-123")
+        project_key = issue_key.split('-', 1)[0]
+        result = sprint_completion_if_issue_removed(project_key=project_key, removed_issue_key=issue_key)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("/jira/sprint-completion-if-removed failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         # In a real app, you'd want to manage session cleanup more robustly (e.g., with timeouts or explicit logout).

@@ -13,15 +13,15 @@ def _jira_env():
         )
     return jira_server, jira_username, jira_api_token
 
-def get_issues_assigned_to_user(username: str) -> str:
+def get_issues_assigned_to_user(username: str) -> dict:
     """
-    Fetches all Jira issues assigned to a specific user and returns a formatted string.
+    Fetches all Jira issues assigned to a specific user and returns raw data.
 
     Args:
         username: The username (display name or account ID) of the assignee.
 
     Returns:
-        A formatted string summarizing the assigned Jira issues.
+        Raw data containing the assigned Jira issues.
     """
     load_dotenv()
     jira_server, jira_username, jira_api_token = _jira_env()

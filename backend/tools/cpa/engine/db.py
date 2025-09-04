@@ -148,13 +148,15 @@ def _upsert_task(db: Session, project_id: int, task_id: str, name: str, est_dura
         })
 
 
-def _replace_dependencies(db: Session, task_id: str, depends_on: List[str]):
+def _replace_dependencies(db: Session, project_id: int, task_id: str, depends_on: List[str]):
     # Clear existing, then insert
     db.execute(text("""
         DELETE FROM dependencies WHERE task_id = :tid
     """), {"tid": task_id})
     for dep in depends_on:
         if dep and dep != task_id:
+            # Ensure dependency task exists before adding relation
+            _upsert_task(db, project_id, dep, dep, 1.0, None, None)
             db.execute(text("""
                 INSERT INTO dependencies (task_id, depends_on) VALUES (:tid, :dep)
                 ON CONFLICT DO NOTHING

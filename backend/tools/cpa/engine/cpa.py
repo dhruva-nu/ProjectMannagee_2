@@ -278,7 +278,7 @@ def summarize_current_sprint_cpa(project_key: str) -> dict:
     """High-level helper: refresh from Jira then run CPA and return a concise summary JSON.
     This is intended to be called from chat by the CPA Engine Agent.
     """
-    ref = refresh_from_jira(project_key)
+    ref = refresh_sprint_from_jira(project_key)
     project_id = ref.get("project_id")
     if not project_id:
         return {"project_key": project_key, "error": "project sync failed"}

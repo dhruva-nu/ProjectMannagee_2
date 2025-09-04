@@ -148,6 +148,125 @@ def current_sprint_cpa_timeline(
     }
 
 
+def sprint_completion_if_issue_removed(
+    project_key: str,
+    removed_issue_key: str,
+    start_on: Optional[str] = None,
+    working_days: Optional[List[int]] = None,
+    global_holidays: Optional[List[str]] = None,
+    holidays_by_user: Optional[Dict[str, List[str]]] = None,
+) -> dict:
+    """
+    Simulate the overall sprint completion date if a given issue is removed from the current sprint.
+
+    Returns a JSON with before/after overall completion ISO dates and delta_days (positive means earlier finish).
+    """
+    # Baseline timeline (with all issues)
+    baseline = current_sprint_cpa_timeline(
+        project_key=project_key,
+        start_on=start_on,
+        working_days=working_days,
+        global_holidays=global_holidays,
+        holidays_by_user=holidays_by_user,
+    )
+
+    # Fetch all issues once and filter out the removed issue, then recompute timelines per user with the same logic
+    issues = _cached_current_sprint_issues(project_key)
+
+    # Determine start date
+    sprint_start, sprint_end = _extract_sprint_dates(issues)
+    start_dt = _parse_iso_date(start_on) if start_on else None
+    base_start = sprint_start or start_dt or datetime.utcnow().date()
+
+    # Working calendar
+    working_days_set: Set[int] = set(working_days) if working_days is not None else {0,1,2,3,4,5,6}
+    global_hols_set: Set[date] = _to_date_set(global_holidays)
+
+    # Prepare per-assignee queues excluding the removed issue
+    sp_key = _sp_field_key()
+    items: List[dict] = []
+    for iss in issues:
+        key = iss.get("key")
+        if key == removed_issue_key:
+            continue
+        fields = iss.get("fields", {})
+        assignee = (fields.get("assignee") or {}).get("displayName") if fields.get("assignee") else "Unassigned"
+        duration_days = _get_task_duration(fields)
+        duration_whole = int(math.ceil(max(0.0, float(duration_days)))) or 1
+        items.append({
+            "key": key,
+            "summary": fields.get("summary"),
+            "assignee": assignee,
+            "story_points": float(fields.get(sp_key)) if (sp_key and fields.get(sp_key) is not None) else None,
+            "estimated_days": duration_whole,
+        })
+
+    # Group by assignee and schedule sequentially
+    by_user: Dict[str, List[dict]] = {}
+    for it in items:
+        by_user.setdefault(it["assignee"], []).append(it)
+
+    def _issue_key_number(k: Optional[str]) -> int:
+        try:
+            if not k or '-' not in k:
+                return 0
+            return int(k.rsplit('-', 1)[1])
+        except Exception:
+            return 0
+
+    schedules: Dict[str, List[dict]] = {}
+    for user, tasks in by_user.items():
+        tasks = sorted(tasks, key=lambda t: (_issue_key_number(t.get("key")), t.get("key") or ""))
+        user_holidays = _to_date_set((holidays_by_user or {}).get(user)) | global_hols_set
+        current = base_start
+        user_sched: List[dict] = []
+        for t in tasks:
+            start_d = current
+            end_d = _advance_working_days(start_d, t["estimated_days"], working_days_set, user_holidays)
+            current = end_d + timedelta(days=1)
+            entry = {
+                "issue": t["key"],
+                "summary": t["summary"],
+                "assignee": user,
+                "start": start_d.isoformat(),
+                "end": end_d.isoformat(),
+                "days": t["estimated_days"],
+            }
+            user_sched.append(entry)
+        schedules[user] = user_sched
+
+    # Overall completion after removal
+    all_ends: List[date] = []
+    for user, sched in schedules.items():
+        for e in sched:
+            all_ends.append(_parse_iso_date(e["end"]))
+    new_overall_end = max([d for d in all_ends if d is not None], default=base_start)
+
+    before_date = baseline.get("overall_completion_date")
+    after_date = new_overall_end.isoformat()
+
+    # Compute delta in days (before - after)
+    delta_days = None
+    try:
+        if before_date:
+            bd = _parse_iso_date(before_date)
+            ad = _parse_iso_date(after_date)
+            if bd and ad:
+                delta_days = (bd - ad).days
+    except Exception:
+        delta_days = None
+
+    return {
+        "project_key": project_key,
+        "removed_issue": removed_issue_key,
+        "sprint_start": (sprint_start or base_start).isoformat() if (sprint_start or base_start) else None,
+        "sprint_end": sprint_end.isoformat() if sprint_end else None,
+        "before_overall_completion_date": before_date,
+        "after_overall_completion_date": after_date,
+        "delta_days": delta_days,
+    }
+
+
 def estimate_issue_completion_in_current_sprint(
     project_key: str,
     issue_key: str,
