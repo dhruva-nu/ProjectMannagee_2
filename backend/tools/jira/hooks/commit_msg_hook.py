@@ -30,21 +30,29 @@ sys.path.insert(0, str(BACKEND_ROOT))
 from tools.jira.cpa_tools import transition_issue_status  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
 
-ISSUE_PATTERN = re.compile(r"--issue\s+([A-Z][A-Z0-9]+-\d+)")
+ISSUE_PATTERN = re.compile(r"--issue\s+([A-Z][A-Z0-9]+-\d+)(?:\s+(--toProgress|--toDone))?")
 
+STATUS_MAP = {
+    None: "In Review",
+    "--toProgress": "In Progress",
+    "--toDone": "Done",
+}
 
-def parse_issue_keys(message: str) -> list[str]:
-    keys: list[str] = []
+def parse_issue_keys(message: str) -> list[tuple[str, str]]:
+    issues_with_status: list[tuple[str, str]] = []
     for m in ISSUE_PATTERN.finditer(message):
-        keys.append(m.group(1))
-    # de-duplicate while preserving order
-    seen = set()
-    ordered = []
-    for k in keys:
-        if k not in seen:
-            seen.add(k)
-            ordered.append(k)
-    return ordered
+        issue_key = m.group(1)
+        status_flag = m.group(2) # This will be '--toProgress', '--toDone', or None
+        target_status = STATUS_MAP.get(status_flag, "In Review") # Default to In Review if flag is not recognized or not present
+        issues_with_status.append((issue_key, target_status))
+
+    # de-duplicate while preserving order, prioritizing later flags for the same issue
+    # A dictionary can handle this naturally.
+    deduplicated_issues = {}
+    for key, status in issues_with_status:
+        deduplicated_issues[key] = status
+
+    return list(deduplicated_issues.items())
 
 
 def main() -> int:
@@ -71,11 +79,11 @@ def main() -> int:
         # Nothing to do; allow commit
         return 0
 
-    # For each referenced issue, transition to In Review
+    # For each referenced issue, transition to the specified status
     failures: list[str] = []
-    for key in issue_keys:
+    for key, target_status in issue_keys: # issue_keys now contains tuples (key, status)
         try:
-            result = transition_issue_status(key, "In Review")
+            result = transition_issue_status(key, target_status)
             # transition_issue_status returns a message string; log it to stderr so commit output shows it
             print(result, file=sys.stderr)
             if not result.lower().startswith("successfully"):

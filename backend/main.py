@@ -255,7 +255,7 @@ async def run_codinator_agent(
         session_id = f"session_{anyio.current_time()}"
         user_id = str(current_user.id)
 
-        session_service.create_session(app_name=runner.app_name, user_id=user_id, session_id=session_id)
+        await session_service.create_session(app_name=runner.app_name, user_id=user_id, session_id=session_id)
 
         # Accept prompt from either JSON body or query/form parameters
         effective_prompt = prompt or (request.prompt if request else None)
@@ -358,13 +358,9 @@ async def run_codinator_agent(
         logger.exception("/codinator/run-agent failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Delete the in-memory session so prior chat turns are not retained
-        try:
-            if session_id and user_id:
-                session_service.delete_session(app_name=runner.app_name, user_id=user_id, session_id=session_id)
-        except Exception:
-            # Best-effort cleanup; do not block response on cleanup failures
-            pass
+        # In a real app, you'd want to manage session cleanup more robustly (e.g., with timeouts or explicit logout).
+        # For now, we'll let in-memory sessions persist to avoid "Session not found" errors.
+        pass
 
 @app.get("/jira/issue-status")
 async def jira_issue_status(key: str = Query(..., description="Jira issue key, e.g., PROJ-123"), current_user: User = Depends(get_current_user)):
