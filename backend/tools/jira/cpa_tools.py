@@ -413,3 +413,58 @@ def add_comment_to_issue(issue_key: str, comment_body: str) -> str:
     else:
         error_message = response.json().get("errorMessages", response.text)
         return f"Failed to add comment to issue {issue_key}: {error_message}"
+
+
+def print_issue_dependency_graph(issue_key: str) -> str:
+    """Build and print a directed weighted dependency graph for the issue's project.
+    This is intended to be called when asked questions like
+    "when can I expect issue TESTPROJ-23 to be complete". For now, it only
+    builds and prints the graph for CPA readiness.
+
+    Returns the textual graph representation as well, for use in UIs.
+    """
+    # Local import to avoid circular dependency: engine_tools imports helpers from this module
+    try:
+        from tools.cpa.engine_tools import print_current_sprint_dependency_graph_for_issue as _print_graph
+    except ModuleNotFoundError:
+        from backend.tools.cpa.engine_tools import print_current_sprint_dependency_graph_for_issue as _print_graph
+    return _print_graph(issue_key)
+
+
+def answer_when_issue_complete_range(issue_key: str,
+                                     capacity_hours_per_user: dict | None = None,
+                                     workdays: bool = True) -> dict:
+    """Return full JSON ETA range for the current sprint (optimistic–pessimistic) for the given issue.
+
+    Parameters:
+    - capacity_hours_per_user: optional mapping like {"alice": 6} to scale durations (8h baseline)
+    - workdays: if True, values are in working days; if False, they are approximated calendar days
+    """
+    if not issue_key or '-' not in issue_key:
+        return {"error": "Please provide a valid Jira issue key, e.g., TESTPROJ-23."}
+    project_key = issue_key.split('-', 1)[0]
+    # Local import to avoid circular dependency
+    try:
+        from tools.cpa.engine_tools import compute_eta_range_for_issue_current_sprint as _eta_range
+    except ModuleNotFoundError:
+        from backend.tools.cpa.engine_tools import compute_eta_range_for_issue_current_sprint as _eta_range
+
+    result = _eta_range(project_key, issue_key, capacity_hours_per_user)
+    if "error" in result:
+        return result
+    result["human"] = f"Expected completion for {issue_key}: {result['optimistic_days']}–{result['pessimistic_days']} days (optimistic–pessimistic). See details."
+    result["workdays"] = workdays
+    return result
+
+
+def answer_when_issue_complete(issue_key: str,
+                               capacity_hours_per_user: dict | None = None,
+                               workdays: bool = True) -> str:
+    """Return a one-line human answer with best and worst case in days for the given issue.
+    Example: "Expected completion for TESTPROJ-25: 4–7 days (optimistic–pessimistic). See details."
+    """
+    res = answer_when_issue_complete_range(issue_key, capacity_hours_per_user, workdays)
+    if isinstance(res, dict) and "error" in res:
+        return res.get("error") or "Could not estimate completion."
+    return res.get("human", "Could not estimate completion.")
+

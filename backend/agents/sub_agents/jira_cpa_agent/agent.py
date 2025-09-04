@@ -9,6 +9,7 @@ from tools.jira.cpa_tools import (
     who_is_assigned,
     transition_issue_status,
     add_comment_to_issue,
+    print_issue_dependency_graph,
 )
 
 """
@@ -36,6 +37,7 @@ jira_cpa_agent = Agent(
         FunctionTool(who_is_assigned),
         FunctionTool(transition_issue_status),
         FunctionTool(add_comment_to_issue),
+        FunctionTool(print_issue_dependency_graph),
     ],
     sub_agents=[],
 )

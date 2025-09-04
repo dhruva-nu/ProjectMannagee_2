@@ -11,18 +11,41 @@ from dotenv import load_dotenv
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
 
-from tools.cpa.engine_tools import (
-    refresh_from_jira,
-    run_cpa,
-    get_critical_path,
-    get_task_slack,
-    get_project_duration,
-    summarize_current_sprint_cpa,
-    current_sprint_cpa_timeline,
-    estimate_issue_completion_in_current_sprint,
-)
+try:
+    from tools.cpa.engine_tools import (
+        refresh_from_jira,
+        run_cpa,
+        get_critical_path,
+        get_task_slack,
+        get_project_duration,
+        summarize_current_sprint_cpa,
+        current_sprint_cpa_timeline,
+        estimate_issue_completion_in_current_sprint,
+        compute_eta_range_for_issue_current_sprint,
+    )
+except ModuleNotFoundError:
+    from backend.tools.cpa.engine_tools import (
+        refresh_from_jira,
+        run_cpa,
+        get_critical_path,
+        get_task_slack,
+        get_project_duration,
+        summarize_current_sprint_cpa,
+        current_sprint_cpa_timeline,
+        estimate_issue_completion_in_current_sprint,
+        compute_eta_range_for_issue_current_sprint,
+    )
 
 load_dotenv()
+
+def estimate_issue_eta_days(issue_key: str) -> dict:
+    """Return optimistic/pessimistic ETA (in days) for an issue in current sprint.
+    Infers project_key from issue key prefix.
+    """
+    if not issue_key or '-' not in issue_key:
+        return {"error": "issue_key must look like 'PROJ-123'"}
+    project_key = issue_key.split('-', 1)[0]
+    return compute_eta_range_for_issue_current_sprint(project_key=project_key, issue_key=issue_key)
 
 cpa_engine_agent = Agent(
     name="cpa_engine_agent",
@@ -43,6 +66,7 @@ cpa_engine_agent = Agent(
         FunctionTool(current_sprint_cpa_timeline),
         FunctionTool(estimate_issue_completion_in_current_sprint),
         FunctionTool(estimate_issue_eta_wrapper),
+        FunctionTool(estimate_issue_eta_days),
     ],
     sub_agents=[],
 )

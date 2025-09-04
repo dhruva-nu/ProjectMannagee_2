@@ -4,3 +4,5 @@ backend/instance/
 backend/.venv
 backend/.env
 woking.md
+**/.workday_state.json
+backend/scripts/test_pert_rcpsp.py

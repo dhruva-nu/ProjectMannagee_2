@@ -278,6 +278,31 @@ async def run_codinator_agent(
                 # Return a structured UI directive for the frontend to consume directly
                 logging.getLogger("api").info("/codinator/run-agent pre-router handled jira status for %s", issue_key)
                 return {"ui": "jira_status", "key": issue_key}
+            # Handle: ETA queries, e.g.,
+            # - "when can I expect issue <KEY> [to be] complete"
+            # - "when can I expect issue <KEY>"
+            # - "eta for <KEY>"
+            is_eta_like = False
+            if issue_key:
+                # Accept natural variants without the word 'issue'
+                if ("expect" in prompt_lc):
+                    is_eta_like = True
+                elif ("eta" in prompt_lc and (issue_key in prompt_lc or "issue" in prompt_lc)):
+                    is_eta_like = True
+                elif ("done" in prompt_lc or "complete" in prompt_lc):
+                    is_eta_like = True
+            if is_eta_like:
+                # Prefer deterministic RCPSP-based ETA from the CPA engine
+                try:
+                    from tools.cpa.engine_tools import compute_eta_range_for_issue_current_sprint
+                except ModuleNotFoundError:
+                    from backend.tools.cpa.engine_tools import compute_eta_range_for_issue_current_sprint
+                project_key = issue_key.split('-', 1)[0] if '-' in issue_key else None
+                if not project_key:
+                    raise HTTPException(status_code=422, detail="Could not infer project_key from issue_key")
+                logging.getLogger("api").info("/codinator/run-agent pre-router handled jira ETA (RCPSP) for %s", issue_key)
+                eta = compute_eta_range_for_issue_current_sprint(project_key=project_key, issue_key=issue_key)
+                return eta
 
         message = genai_types.Content(role="user", parts=[genai_types.Part(text=effective_prompt)])
 
