@@ -79,11 +79,11 @@ def main() -> int:
         # Nothing to do; allow commit
         return 0
 
-    # For each referenced issue, transition to the specified status
+    # For each referenced issue, transition to In Review
     failures: list[str] = []
-    for key, target_status in issue_keys: # issue_keys now contains tuples (key, status)
+    for key in issue_keys:
         try:
-            result = transition_issue_status(key, target_status)
+            result = transition_issue_status(key, "In Review")
             # transition_issue_status returns a message string; log it to stderr so commit output shows it
             print(result, file=sys.stderr)
             if not result.lower().startswith("successfully"):

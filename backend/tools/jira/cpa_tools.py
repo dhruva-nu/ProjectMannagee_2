@@ -423,11 +423,11 @@ def print_issue_dependency_graph(issue_key: str) -> str:
 
     Returns the textual graph representation as well, for use in UIs.
     """
-    # Local import to avoid circular dependency: engine_tools imports helpers from this module
+    # Local import to avoid circular dependency: engine imports helpers from this module
     try:
-        from tools.cpa.engine_tools import print_current_sprint_dependency_graph_for_issue as _print_graph
+        from tools.cpa.engine import print_current_sprint_dependency_graph_for_issue as _print_graph
     except ModuleNotFoundError:
-        from backend.tools.cpa.engine_tools import print_current_sprint_dependency_graph_for_issue as _print_graph
+        from backend.tools.cpa.engine import print_current_sprint_dependency_graph_for_issue as _print_graph
     return _print_graph(issue_key)
 
 
@@ -445,9 +445,9 @@ def answer_when_issue_complete_range(issue_key: str,
     project_key = issue_key.split('-', 1)[0]
     # Local import to avoid circular dependency
     try:
-        from tools.cpa.engine_tools import compute_eta_range_for_issue_current_sprint as _eta_range
+        from tools.cpa.engine import compute_eta_range_for_issue_current_sprint as _eta_range
     except ModuleNotFoundError:
-        from backend.tools.cpa.engine_tools import compute_eta_range_for_issue_current_sprint as _eta_range
+        from backend.tools.cpa.engine import compute_eta_range_for_issue_current_sprint as _eta_range
 
     result = _eta_range(project_key, issue_key, capacity_hours_per_user)
     if "error" in result:

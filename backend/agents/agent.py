@@ -3,7 +3,7 @@ from google.adk.agents import Agent
 from google.adk.tools.agent_tool import AgentTool
 from google.adk.tools import FunctionTool
 from tools.jira.cpa_tools import who_is_assigned
-from .sub_agents.jira_sprint_agent.agent import jira_sprint_agent
+from .sub_agents.jira_agent.agent import jira_agent
 from .sub_agents.github_repo_agent.agent import github_repo_agent
 from .sub_agents.jira_cpa_agent.agent import jira_cpa_agent
 from .sub_agents.cpa_engine_agent.agent import cpa_engine_agent
@@ -55,11 +55,11 @@ When using the 'answer_jira_query' tool, you must ask the user for the 'issue_ke
    {"ui": "issue_list", "data": <output_of_get_issues_assigned_to_user>}
  - Do not include analysis or extra text around the JSON. If the issue key is unclear, ask a clarifying question in plain text.
     """,
-    sub_agents=[jira_sprint_agent, github_repo_agent, jira_cpa_agent, cpa_engine_agent],
+    sub_agents=[jira_agent, github_repo_agent, jira_cpa_agent, cpa_engine_agent],
     tools=[
         # Prefer direct tool for assignee lookups to avoid free-text answers
         FunctionTool(who_is_assigned),
-        AgentTool(jira_sprint_agent),
+        AgentTool(jira_agent),
         AgentTool(github_repo_agent),
         AgentTool(jira_cpa_agent),
         AgentTool(cpa_engine_agent),

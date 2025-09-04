@@ -3,7 +3,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from backend.tools.cpa.engine_tools import (
+from backend.tools.cpa.engine import (
     refresh_from_jira,
     run_cpa,
     get_critical_path,

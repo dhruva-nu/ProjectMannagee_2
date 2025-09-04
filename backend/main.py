@@ -294,9 +294,9 @@ async def run_codinator_agent(
             if is_eta_like:
                 # Prefer deterministic RCPSP-based ETA from the CPA engine
                 try:
-                    from tools.cpa.engine_tools import compute_eta_range_for_issue_current_sprint
+                    from tools.cpa.engine import compute_eta_range_for_issue_current_sprint
                 except ModuleNotFoundError:
-                    from backend.tools.cpa.engine_tools import compute_eta_range_for_issue_current_sprint
+                    from backend.tools.cpa.engine import compute_eta_range_for_issue_current_sprint
                 project_key = issue_key.split('-', 1)[0] if '-' in issue_key else None
                 if not project_key:
                     raise HTTPException(status_code=422, detail="Could not infer project_key from issue_key")
