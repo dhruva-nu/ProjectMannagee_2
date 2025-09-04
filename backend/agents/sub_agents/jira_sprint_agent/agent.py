@@ -6,6 +6,8 @@ from tools.jira.sprint_tools import (
     summarize_issues_in_sprint_v1,
     summarize_current_sprint_default,
     summarize_issues_in_sprint_default,
+    get_issues_for_active_sprint_v1,
+    get_issues_for_active_sprint_default,
 )
 from tools.jira.user_issues_tools import get_issues_assigned_to_user
 
@@ -35,6 +37,8 @@ jira_sprint_agent = Agent(
         FunctionTool(summarize_current_sprint_default),
         FunctionTool(summarize_issues_in_sprint_default),
         FunctionTool(get_issues_assigned_to_user),
+        FunctionTool(get_issues_for_active_sprint_v1),
+        FunctionTool(get_issues_for_active_sprint_default),
     ],
     sub_agents=[],
 )

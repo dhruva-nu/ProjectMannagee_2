@@ -1,6 +1,8 @@
 import { forwardRef, useImperativeHandle, useState } from 'react'
 import JiraStatus, { type JiraStatusData } from './JiraStatus'
 import SprintStatus, { type SprintStatusData } from './SprintStatus'
+import UserCard, { type UserCardData } from './UserCard'
+import IssueList, { type IssueListData } from './IssueList'
 
 type Message = {
   role: 'user' | 'assistant' | 'system'
@@ -8,6 +10,8 @@ type Message = {
   ui?:
     | { type: 'jira_status'; data: JiraStatusData }
     | { type: 'sprint_status'; data: SprintStatusData }
+    | { type: 'user_card'; data: UserCardData }
+    | { type: 'issue_list'; data: IssueListData }
 }
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000'
@@ -20,6 +24,8 @@ export type ChatBoxHandle = {
 export type ChatUiMessage =
   | { type: 'jira_status'; data: JiraStatusData }
   | { type: 'sprint_status'; data: SprintStatusData }
+  | { type: 'user_card'; data: UserCardData }
+  | { type: 'issue_list'; data: IssueListData }
 
 const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) => void }>(function ChatBox(
   { onUiMessage },
@@ -30,47 +36,7 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
   const [loading, setLoading] = useState(false)
   const [agentName, setAgentName] = useState('codinator')
 
-  // Extract project key from free-form user text.
-  // Matches: "@TESTPROJ" or "project TESTPROJ" (keys are typically A-Z, 0-9, dash/underscore)
-  const extractProjectKey = (text: string): string | null => {
-    if (!text) return null
-    const atMatch = /@([A-Z0-9_\-]+)/i.exec(text)
-    if (atMatch && atMatch[1]) return atMatch[1].toUpperCase()
-    const projMatch = /project\s+([A-Z0-9_\-]+)/i.exec(text)
-    if (projMatch && projMatch[1]) return projMatch[1].toUpperCase()
-    return null
-  }
-
-  // Try to parse a UI directive from raw model text.
-  // Supports plain JSON, ```json fenced blocks, ``` fenced blocks, and inline objects.
-  const parseDirective = (raw: string): any | null => {
-    if (!raw) return null
-    // 1) direct JSON
-    try { return JSON.parse(raw) } catch {}
-    // 2) code-fenced ```json ... ```
-    const fenceJson = /```json\s*([\s\S]*?)\s*```/i.exec(raw)
-    if (fenceJson && fenceJson[1]) {
-      const inner = fenceJson[1].trim()
-      try { return JSON.parse(inner) } catch {}
-    }
-    // 3) generic code fence ``` ... ```
-    const fence = /```\s*([\s\S]*?)\s*```/i.exec(raw)
-    if (fence && fence[1]) {
-      const inner = fence[1].trim()
-      try { return JSON.parse(inner) } catch {}
-    }
-    // 4) inline minimal match for our directive
-    const inline = /\{\s*"ui"\s*:\s*"jira_status"[\s\S]*?\}/i.exec(raw)
-    if (inline && inline[0]) {
-      try { return JSON.parse(inline[0]) } catch {}
-    }
-    // 5) inline minimal match for sprint directive
-    const inlineSprint = /\{\s*"ui"\s*:\s*"sprint_status"[\s\S]*?\}/i.exec(raw)
-    if (inlineSprint && inlineSprint[0]) {
-      try { return JSON.parse(inlineSprint[0]) } catch {}
-    }
-    return null
-  }
+  // All UI decisions are driven by backend-structured responses.
 
   const coreSend = async (text: string) => {
     if (!text.trim() || loading) return
@@ -145,103 +111,61 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
         const uiMsg: Message = { role: 'assistant', ui }
         setMessages((prev) => [...prev, uiMsg])
         onUiMessage?.(ui)
-      } else {
-        // 2) Fallback to text response and client-side parsing (legacy)
-        const raw = (data?.response && String(data.response).trim()) || ''
-        const parsed: any = parseDirective(raw)
-
-        if (parsed && parsed.ui === 'jira_status' && typeof parsed.key === 'string') {
-          const jurl = new URL(`${API_BASE}/jira/issue-status`)
-          jurl.searchParams.set('key', parsed.key)
-          const token = localStorage.getItem('access_token')
-          const jres = await fetch(jurl.toString(), {
-            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-          })
-          let jdata: any = null
-          try { jdata = await jres.json() } catch {}
-          if (!jres.ok) {
-            const errText = jdata?.detail || jdata?.error || `HTTP ${jres.status}`
-            throw new Error(errText)
-          }
-          const uiData: JiraStatusData = {
-            key: jdata.key,
-            name: jdata.name ?? null,
-            expectedFinishDate: jdata.expectedFinishDate ?? null,
-            status: jdata.status ?? null,
-            comments: Array.isArray(jdata.comments) ? jdata.comments : [],
-          }
-          const ui: ChatUiMessage = { type: 'jira_status', data: uiData }
-          const uiMsg: Message = { role: 'assistant', ui }
-          setMessages((prev) => [...prev, uiMsg])
-          onUiMessage?.(ui)
-        } else if (parsed && parsed.ui === 'sprint_status' && typeof parsed.project_key === 'string') {
-          const surl = new URL(`${API_BASE}/jira/sprint-status`)
-          surl.searchParams.set('project_key', parsed.project_key)
-          const token = localStorage.getItem('access_token')
-          const sres = await fetch(surl.toString(), {
-            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-          })
-          let sdata: any = null
-          try { sdata = await sres.json() } catch {}
-          if (!sres.ok) {
-            const errText = sdata?.detail || sdata?.error || `HTTP ${sres.status}`
-            throw new Error(errText)
-          }
-          const uiData: SprintStatusData = {
-            name: sdata.name ?? null,
-            startDate: sdata.startDate ?? null,
-            endDate: sdata.endDate ?? null,
-            notes: Array.isArray(sdata.notes) ? sdata.notes : [],
-            totalIssues: typeof sdata.totalIssues === 'number' ? sdata.totalIssues : undefined,
-            completedIssues: typeof sdata.completedIssues === 'number' ? sdata.completedIssues : undefined,
-          }
-          const ui: ChatUiMessage = { type: 'sprint_status', data: uiData }
-          const uiMsg: Message = { role: 'assistant', ui }
-          setMessages((prev) => [...prev, uiMsg])
-          onUiMessage?.(ui)
-        } else {
-          const assistantMsg: Message = {
-            role: 'assistant',
-            content: raw || 'No response from agent'
-          }
-          setMessages((prev) => [...prev, assistantMsg])
-
-          // Client-side heuristic: if user asked about a specific project, proactively fetch sprint status
-          const maybeKey = extractProjectKey(userMsg.content || '')
-          if (maybeKey) {
-            try {
-              const surl = new URL(`${API_BASE}/jira/sprint-status`)
-              surl.searchParams.set('project_key', maybeKey)
-              const token = localStorage.getItem('access_token')
-              const sres = await fetch(surl.toString(), {
-                headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-              })
-              let sdata: any = null
-              try { sdata = await sres.json() } catch {}
-              if (sres.ok) {
-                const uiData: SprintStatusData = {
-                  name: sdata.name ?? null,
-                  startDate: sdata.startDate ?? null,
-                  endDate: sdata.endDate ?? null,
-                  notes: Array.isArray(sdata.notes) ? sdata.notes : [],
-                  totalIssues: typeof sdata.totalIssues === 'number' ? sdata.totalIssues : undefined,
-                  completedIssues: typeof sdata.completedIssues === 'number' ? sdata.completedIssues : undefined,
-                }
-                const ui: ChatUiMessage = { type: 'sprint_status', data: uiData }
-                const uiMsg: Message = { role: 'assistant', ui }
-                setMessages((prev) => [...prev, uiMsg])
-                onUiMessage?.(ui)
-              }
-            } catch {}
-          }
+      } else if (data && data.ui === 'user_card' && typeof data.name === 'string') {
+        const uiData: UserCardData = {
+          name: data.name,
+          designation: typeof data.designation === 'string' ? data.designation : undefined,
+          email: typeof data.email === 'string' ? data.email : undefined,
+          avatarUrl: typeof data.avatarUrl === 'string' ? data.avatarUrl : undefined,
+          online: typeof data.online === 'boolean' ? data.online : undefined,
         }
+        const ui: ChatUiMessage = { type: 'user_card', data: uiData }
+        const uiMsg: Message = { role: 'assistant', ui }
+        setMessages((prev) => [...prev, uiMsg])
+        onUiMessage?.(ui)
+      } else if (data && data.ui === 'issue_list') {
+        // Support both shapes:
+        // 1) { ui: 'issue_list', issues: [...], title? }
+        // 2) { ui: 'issue_list', data: { issues: [...], title? } }
+        const payload = Array.isArray(data.issues)
+          ? { title: data.title, issues: data.issues }
+          : (data.data || {})
+
+        const issuesArr = Array.isArray(payload.issues) ? payload.issues : []
+
+        const uiData: IssueListData = {
+          title: typeof payload.title === 'string' ? payload.title : undefined,
+          issues: issuesArr
+            .map((it: any) => ({
+              key: String(it.key || ''),
+              summary: typeof it.summary === 'string' ? it.summary : undefined,
+              status: typeof it.status === 'string' ? it.status : undefined,
+              priority: typeof it.priority === 'string' ? it.priority : undefined,
+              url: typeof it.url === 'string' ? it.url : undefined,
+            }))
+            .filter((it: any) => it.key),
+        }
+        const ui: ChatUiMessage = { type: 'issue_list', data: uiData }
+        const uiMsg: Message = { role: 'assistant', ui }
+        setMessages((prev) => [...prev, uiMsg])
+        onUiMessage?.(ui)
+      } else {
+        // Plain text fallback – backend decides UI; we only display text.
+        const raw = (data?.response && String(data.response).trim()) || ''
+        const assistantMsg: Message = {
+          role: 'assistant',
+          content: raw || 'No response from agent'
+        }
+        setMessages((prev) => [...prev, assistantMsg])
       }
-    } catch (e: any) {
+    }
+    catch (e: any) {
       setMessages((prev) => [
         ...prev,
         { role: 'system', content: `Error: ${e?.message || 'Unknown error'}` },
       ])
-    } finally {
+    }
+    finally {
       setLoading(false)
     }
   }
@@ -296,6 +220,10 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
               <JiraStatus data={m.ui.data} />
             ) : m.ui?.type === 'sprint_status' ? (
               <SprintStatus data={m.ui.data} />
+            ) : m.ui?.type === 'user_card' ? (
+              <UserCard data={m.ui.data} />
+            ) : m.ui?.type === 'issue_list' ? (
+              <IssueList data={m.ui.data} />
             ) : (
               m.content
             )}

@@ -3,6 +3,8 @@ import ChatBox, { type ChatBoxHandle, type ChatUiMessage } from '../components/C
 import IssueQuickAdd from '../components/IssueQuickAdd';
 import JiraStatus from '../components/JiraStatus';
 import SprintStatus from '../components/SprintStatus';
+import UserCard from '../components/UserCard';
+import IssueList from '../components/IssueList';
 
 const DashboardPage: React.FC = () => {
   const chatRef = useRef<ChatBoxHandle>(null)
@@ -44,6 +46,10 @@ const DashboardPage: React.FC = () => {
             <JiraStatus key={animationKey} data={latestUi.data} />
           ) : latestUi.type === 'sprint_status' ? (
             <SprintStatus key={animationKey} data={latestUi.data} />
+          ) : latestUi.type === 'user_card' ? (
+            <UserCard key={animationKey} data={latestUi.data} />
+          ) : latestUi.type === 'issue_list' ? (
+            <IssueList key={animationKey} data={latestUi.data as any} />
           ) : null}
         </div>
       )}

@@ -13,45 +13,43 @@ def _jira_env():
         )
     return jira_server, jira_username, jira_api_token
 
-def get_issues_assigned_to_user(username: str) -> list[dict]:
+def get_issues_assigned_to_user(username: str) -> str:
     """
-    Fetches all Jira issues assigned to a specific user.
+    Fetches all Jira issues assigned to a specific user and returns a formatted string.
 
     Args:
         username: The username (display name or account ID) of the assignee.
 
     Returns:
-        A list of dictionaries, where each dictionary represents a Jira issue
-        with its key, summary, status, and assignee.
+        A formatted string summarizing the assigned Jira issues.
     """
     load_dotenv()
     jira_server, jira_username, jira_api_token = _jira_env()
     auth = HTTPBasicAuth(jira_username, jira_api_token)
     headers = {"Accept": "application/json"}
 
-    # JQL to find issues assigned to the specified user
     jql_query = f'assignee = "{username}" ORDER BY created DESC'
     search_url = f"{jira_server}/rest/api/2/search"
 
     all_issues = []
     start_at = 0
-    max_results = 50  # Fetch issues in batches
+    max_results = 50
 
     while True:
         params = {
             "jql": jql_query,
             "startAt": start_at,
             "maxResults": max_results,
-            "fields": "key,summary,status,assignee" # Request only necessary fields
+            "fields": "key,summary,status,priority,assignee"
         }
         response = requests.get(search_url, headers=headers, auth=auth, params=params).json()
 
         if response.get("errorMessages"):
-            raise Exception(f"Jira API Error: {response.get('errorMessages')}")
+            return {"error": f"Error fetching issues: {response.get('errorMessages')}"}
 
         issues = response.get("issues", [])
         if not issues:
-            break # No more issues to fetch
+            break
 
         for issue in issues:
             fields = issue.get("fields", {})
@@ -59,12 +57,16 @@ def get_issues_assigned_to_user(username: str) -> list[dict]:
                 "key": issue.get("key"),
                 "summary": fields.get("summary"),
                 "status": fields.get("status", {}).get("name"),
-                "assignee": fields.get("assignee", {}).get("displayName") if fields.get("assignee") else None,
+                "priority": fields.get("priority", {}).get("name"),
+                "url": f"{jira_server}/browse/{issue.get("key")}",
             })
         
         start_at += len(issues)
         if start_at >= response.get("total", 0):
-            break # All issues fetched
+            break
 
-    return all_issues
+    if not all_issues:
+        return {"title": f"No issues found assigned to {username}.", "issues": []}
+
+    return {"title": f"Issues assigned to {username}", "issues": all_issues}
 

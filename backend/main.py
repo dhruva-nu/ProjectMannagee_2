@@ -13,6 +13,8 @@ from agents.agent import agent
 import os
 import requests
 from requests.auth import HTTPBasicAuth
+import json
+import re
 from tools.jira.sprint_tools import _fetch_active_sprint, _fetch_issues_in_active_sprint
 from fastapi import Depends, status, Header
 from passlib.hash import bcrypt
@@ -22,6 +24,8 @@ from app.db.database import get_db
 from jose import jwt, JWTError
 import re
 import time
+
+
 
 app = FastAPI()
 
@@ -70,7 +74,7 @@ app.add_middleware(
 # JWT configuration
 SECRET_KEY = os.getenv("JWT_SECRET", "dev-secret-change-me")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "3600"))
 
 # Simple in-memory cache for Jira issue status to reduce repeated calls
 _ISSUE_STATUS_CACHE: dict[str, tuple[float, dict]] = {}
@@ -208,6 +212,7 @@ async def run_codinator_agent(
 
         # Accept prompt from either JSON body or query/form parameters
         effective_prompt = prompt or (request.prompt if request else None)
+        logger.debug("Received prompt: %s", effective_prompt)
         if not effective_prompt or not effective_prompt.strip():
             raise HTTPException(status_code=422, detail="Missing 'prompt'. Provide it in JSON body or as query param ?prompt=")
 
@@ -226,6 +231,7 @@ async def run_codinator_agent(
         message = genai_types.Content(role="user", parts=[genai_types.Part(text=effective_prompt)])
 
         final_response = ""
+        logger.debug("Starting runner.run_async for prompt: %s", effective_prompt)
         with anyio.move_on_after(45) as cancel_scope:  # 45s timeout
             async for event in runner.run_async(
                 user_id=user_id,
@@ -235,8 +241,10 @@ async def run_codinator_agent(
                 if event.is_final_response():
                     if event.content and event.content.parts:
                         final_response = "".join(part.text for part in event.content.parts if part.text)
+                    logger.debug("Runner produced final_response (raw): %s", final_response)
                     break  # Exit after getting the final response
 
+        logger.debug("Finished runner.run_async. final_response is empty: %s", not final_response)
         if cancel_scope.cancel_called:
             logger.warning("/codinator/run-agent timeout")
             raise HTTPException(status_code=504, detail="Agent timed out")
@@ -246,6 +254,31 @@ async def run_codinator_agent(
             raise HTTPException(status_code=502, detail="Empty response from agent")
 
         logger.info("/codinator/run-agent success")
+        
+        # Attempt to parse final_response as JSON for UI directives
+        parsed_json_data = None
+        try:
+            # Try to extract JSON from markdown code block
+            match = re.search(r'```json\n(.*)\n```', final_response, re.DOTALL)
+            if match:
+                json_str = match.group(1)
+                logger.debug("Extracted JSON string from markdown: %s", json_str)
+                parsed_json_data = json.loads(json_str)
+            else:
+                # If not in markdown, try to parse the whole response as JSON
+                logger.debug("Attempting to parse whole response as JSON: %s", final_response)
+                parsed_json_data = json.loads(final_response)
+
+            if isinstance(parsed_json_data, dict) and "ui" in parsed_json_data:
+                logger.debug("Returning UI directive: %s", parsed_json_data)
+                # If it's a UI directive, return it directly
+                return parsed_json_data
+        except json.JSONDecodeError as e:
+            logger.debug("JSONDecodeError: %s. Response was not valid JSON. Raw response: %s", e, final_response)
+            # Not a valid JSON response, treat as plain text
+            pass
+
+        logger.debug("Returning plain text response: %s", final_response)
         return {"response": final_response}
 
     except HTTPException:

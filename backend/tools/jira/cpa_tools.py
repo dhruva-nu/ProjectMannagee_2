@@ -42,7 +42,7 @@ def _fetch_issue_details(issue_key: str) -> dict | None:
     jira_server, jira_username, jira_api_token = _jira_env()
     auth = HTTPBasicAuth(jira_username, jira_api_token)
     headers = {"Accept": "application/json"}
-    issue_url = f"{jira_server}/rest/api/2/issue/{issue_key}"
+    issue_url = f"{jira_server}/rest/api/2/issue/{issue_key}?fields=summary,status,assignee,reporter,priority,issuetype,created,updated,duedate,resolutiondate,description,comment,labels,components,fixVersions,issuelinks"
     response = requests.get(issue_url, headers=headers, auth=auth).json()
     if response.get("errorMessages") or response.get("errors"):
         return None
@@ -62,11 +62,16 @@ def _fetch_issue_details(issue_key: str) -> dict | None:
                 "key": inward_issue.get("key"),
                 "summary": (inward_issue.get("fields") or {}).get("summary"),
             })
+    assignee_data = fields.get("assignee", {})
     return {
         "key": response.get("key"),
         "summary": fields.get("summary"),
         "status": fields.get("status", {}).get("name"),
-        "assignee": fields.get("assignee", {}).get("displayName") if fields.get("assignee") else None,
+        "assignee": {
+            "displayName": assignee_data.get("displayName"),
+            "emailAddress": assignee_data.get("emailAddress"),
+            "avatarUrls": assignee_data.get("avatarUrls"),
+        } if assignee_data else None,
         "reporter": fields.get("reporter", {}).get("displayName") if fields.get("reporter") else None,
         "priority": fields.get("priority", {}).get("name"),
         "issue_type": fields.get("issuetype", {}).get("name"),
@@ -303,14 +308,34 @@ def answer_sprint_hypothetical(project_key: str, issue_key: str, query: str) -> 
     return "\n".join(lines)
 
 
-def who_is_assigned(issue_key: str) -> str:
+def who_is_assigned(issue_key: str) -> dict:
     """Returns the assignee display name (or 'unassigned') for the given issue."""
     load_dotenv()
     details = _fetch_issue_details(issue_key)
     if not details:
-        return f"Could not find details for Jira issue {issue_key}."
-    assignee = details.get("assignee") or "unassigned"
-    return f"{issue_key} is assigned to: {assignee}"
+        return {"response": f"Could not find details for Jira issue {issue_key}."}
+
+    assignee_data = details.get("assignee")
+    if not assignee_data or not assignee_data.get("displayName"):
+        return {"response": f"Issue {issue_key} is unassigned."}
+
+    display_name = assignee_data.get("displayName")
+    email_address = assignee_data.get("emailAddress")
+    avatar_urls = assignee_data.get("avatarUrls")
+
+    # Prioritize 48x48, then 32x32, then any available
+    avatar_url = None
+    if avatar_urls:
+        avatar_url = avatar_urls.get("48x48") or avatar_urls.get("32x32") or next(iter(avatar_urls.values()), None)
+
+    user_card_data = {
+        "name": display_name,
+        "email": email_address,
+        "avatarUrl": avatar_url,
+        # You can add 'designation' or 'online' if you have a way to fetch them
+    }
+
+    return {"ui": "user_card", "data": user_card_data}
 
 def transition_issue_status(issue_key: str, new_status: str) -> str:
     """

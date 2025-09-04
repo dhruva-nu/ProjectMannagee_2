@@ -220,3 +220,26 @@ def summarize_issues_in_sprint_v1(project_key: str, max_results: int = 50) -> st
                 lines.append(f"- {it.get('key')}: {it.get('summary')} (status: {it.get('status')}, assignee: {it.get('assignee')})")
         lines.append(f"(LLM fallback due to error: {e})")
         return "\n".join(lines)
+
+def get_issues_for_active_sprint_v1(project_key: str) -> list[dict]:
+    """
+    Retrieves a list of issues for the current active sprint in a given Jira project.
+    Each issue is returned as a simplified dictionary containing key, summary, status, and assignee.
+    """
+    load_dotenv()
+    data, err = _fetch_issues_in_active_sprint(project_key)
+    if err:
+        return [] # Return empty list on error
+    if isinstance(data, str): # This case handles "No active sprint found" message
+        return []
+    return data.get("issues", [])
+
+def get_issues_for_active_sprint_default() -> list[dict]:
+    """
+    Retrieves a list of issues for the current active sprint using the remembered project_key.
+    Each issue is returned as a simplified dictionary containing key, summary, status, and assignee.
+    """
+    project_key = _recall_project_key()
+    if not project_key:
+        return [] # Return empty list if no project_key is remembered
+    return get_issues_for_active_sprint_v1(project_key)

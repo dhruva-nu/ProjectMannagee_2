@@ -36,7 +36,7 @@ When using the 'answer_jira_query' tool, you must ask the user for the 'issue_ke
  For assignee lookups, use jira_cpa_agent's 'who_is_assigned(issue_key)'. For blockers, use 'what_is_blocking(issue_key)'.
 
  For a concise Critical Path Analysis summary of the current sprint for a Jira project, call cpa_engine_agent's 'summarize_current_sprint_cpa(project_key)'. If the user doesn't provide project_key, ask for it explicitly.
- For queries about issues assigned to a specific user (e.g., "how many tasks do I have assigned?", "show me issues assigned to USER_A"), use jira_sprint_agent's 'get_issues_assigned_to_user(username)' tool.
+ For queries about issues assigned to a specific user (e.g., "how many tasks do I have assigned?", "show me issues assigned to USER_A"), use jira_sprint_agent's 'get_issues_assigned_to_user(username)' tool. The response should be a JSON object in the format: {"ui": "issue_list", "data": {"title": "<title_string>", "issues": [{"key": "<issue_key>", "summary": "<summary_string>", "status": "<status_string>", "priority": "<priority_string>", "url": "<url_string>"}, ...]}}.
  To change the status of a Jira issue, use jira_cpa_agent's 'transition_issue_status(issue_key, new_status)' tool. You must ask the user for the 'issue_key' and the 'new_status'.
  To add a comment to a Jira issue, use jira_cpa_agent's 'add_comment_to_issue(issue_key, comment_body)' tool. You must ask the user for the 'issue_key' and the 'comment_body'.
 
@@ -47,6 +47,8 @@ When using the 'answer_jira_query' tool, you must ask the user for the 'issue_ke
  Generative UI directive:
  - When the user asks for the Jira status for a specific issue (e.g., "JIRA status for issue PROJ-123"), respond ONLY with a single-line JSON object, no prose, in the exact format:
    {"ui": "jira_status", "key": "PROJ-123"}
+ - When the user asks for the list of Jira issues in the current sprint (e.g., "JIRA issues in the current sprint"), respond ONLY with a single-line JSON object, no prose, in the exact format:
+   {"ui": "issue_list", "data": <output_of_get_issues_assigned_to_user>}
  - Do not include analysis or extra text around the JSON. If the issue key is unclear, ask a clarifying question in plain text.
     """,
     sub_agents=[jira_sprint_agent, github_repo_agent, jira_cpa_agent, cpa_engine_agent],
