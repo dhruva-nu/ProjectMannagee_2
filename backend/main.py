@@ -10,6 +10,7 @@ import anyio
 import logging
 from datetime import datetime, timedelta, timezone
 from agents.agent import agent
+from agents.sub_agents.formatter_agent.agent import formatter_agent
 import os
 import requests
 from requests.auth import HTTPBasicAuth
@@ -21,7 +22,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.db.database import get_db
 import time
-import re
 from tools.github.repo_tools import list_todays_commits
 from app.commands import handle_cli_commands, _extract_jira_key
 import hmac
@@ -59,6 +59,8 @@ load_dotenv(dotenv_path=(Path(__file__).parent / ".env"))
 # This is new: Initialize the ADK Runner
 session_service = InMemorySessionService()
 runner = Runner(app_name="ProjectMannagee", agent=agent, session_service=session_service)
+# Runner dedicated to the formatter agent
+formatter_runner = Runner(app_name="ProjectMannagee-Formatter", agent=formatter_agent, session_service=session_service)
 
 
 # Enable CORS for local frontend dev server
@@ -292,17 +294,12 @@ async def run_codinator_agent(
                 elif ("done" in prompt_lc or "complete" in prompt_lc):
                     is_eta_like = True
             if is_eta_like:
-                # Prefer deterministic RCPSP-based ETA from the CPA engine
-                try:
-                    from tools.cpa.engine import compute_eta_range_for_issue_current_sprint
-                except ModuleNotFoundError:
-                    from backend.tools.cpa.engine import compute_eta_range_for_issue_current_sprint
+                # Return structured UI directive; frontend will fetch details from /jira/issue-eta-graph
                 project_key = issue_key.split('-', 1)[0] if '-' in issue_key else None
                 if not project_key:
                     raise HTTPException(status_code=422, detail="Could not infer project_key from issue_key")
-                logging.getLogger("api").info("/codinator/run-agent pre-router handled jira ETA (RCPSP) for %s", issue_key)
-                eta = compute_eta_range_for_issue_current_sprint(project_key=project_key, issue_key=issue_key)
-                return eta
+                logging.getLogger("api").info("/codinator/run-agent pre-router handled jira ETA directive for %s", issue_key)
+                return {"ui": "eta_estimate", "issue_key": issue_key}
 
             # Handle: sprint completion if removing an issue
             # e.g., "if I remove issue TESTPROJ-12, when can I expect to complete the sprint"
@@ -353,10 +350,36 @@ async def run_codinator_agent(
             logger.error("/codinator/run-agent empty response from agent")
             raise HTTPException(status_code=502, detail="Empty response from agent")
 
-        logger.info("/codinator/run-agent success; returning plain response")
-        # Return the plain LLM response without additional formatting
-        return {"response": final_response}
+        # Pipe through the formatter agent to produce UI-ready JSON
+        formatting_prompt = (
+            "Original User Input:\n" + effective_prompt.strip() + "\n\n" +
+            "Raw Text/Tool Output:\n" + final_response.strip()
+        )
+        formatting_message = genai_types.Content(role="user", parts=[genai_types.Part(text=formatting_prompt)])
 
+        # Ensure a session exists for the formatter app
+        formatter_session_id = f"{session_id}-formatter"
+        await session_service.create_session(app_name=formatter_runner.app_name, user_id=user_id, session_id=formatter_session_id)
+
+        formatted_text = ""
+        logger.info("[formatter agent] invoking to structure UI output")
+        with anyio.move_on_after(20) as fmt_cancel_scope:  # shorter timeout for formatting
+            async for event in formatter_runner.run_async(
+                user_id=user_id,
+                session_id=formatter_session_id,
+                new_message=formatting_message,
+            ):
+                if event.is_final_response():
+                    if event.content and event.content.parts:
+                        formatted_text = "".join(part.text for part in event.content.parts if part.text)
+                    logger.info("[formatter agent] final response: %s", formatted_text)
+                    break
+
+        if fmt_cancel_scope.cancel_called:
+            logger.warning("/codinator/run-agent formatter timeout; falling back to generic UI")
+    
+        return formatted_text
+        
     except HTTPException:
         raise
     except Exception as e:
@@ -507,6 +530,83 @@ async def jira_sprint_status(project_key: str = Query(..., description="Jira pro
         raise
     except Exception as e:
         logging.exception("/jira/sprint-status failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/jira/issue-eta-graph")
+async def jira_issue_eta_graph(
+    issue_key: str = Query(..., description="Jira issue key, e.g., PROJ-123"),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns ETA range and a dependency subgraph for the given issue using current sprint data.
+    Response shape:
+    {
+      issue: str,
+      project_key: str,
+      optimistic_days: int,
+      pessimistic_days: int,
+      optimistic_schedule: [...],
+      pessimistic_schedule: [...],
+      nodes: { key: { assignee, duration_days, dependencies: [...] } }
+    }
+    """
+    try:
+        if not issue_key or '-' not in issue_key:
+            raise HTTPException(status_code=422, detail="Please provide a valid Jira issue key, e.g., PROJ-123")
+        project_key = issue_key.split('-', 1)[0]
+        try:
+            from tools.cpa.engine.sprint_eta import compute_eta_range_for_issue_current_sprint
+        except ModuleNotFoundError:
+            from backend.tools.cpa.engine.sprint_eta import compute_eta_range_for_issue_current_sprint
+        try:
+            from tools.cpa.engine.sprint_dependency import current_sprint_dependency_graph
+        except ModuleNotFoundError:
+            from backend.tools.cpa.engine.sprint_dependency import current_sprint_dependency_graph
+
+        eta = compute_eta_range_for_issue_current_sprint(project_key=project_key, issue_key=issue_key)
+        graph = current_sprint_dependency_graph(project_key)
+        nodes = graph.get("nodes", {})
+
+        # Build subgraph of ancestors + target
+        def ancestors_of(target: str) -> set:
+            parents = {k: nd.get("dependencies", []) for k, nd in nodes.items()}
+            anc = set()
+            def dfs(u: str):
+                for p in parents.get(u, []):
+                    if p not in anc:
+                        anc.add(p)
+                        dfs(p)
+            dfs(target)
+            return anc
+
+        anc = ancestors_of(issue_key)
+        sub_nodes = {}
+        for k, nd in nodes.items():
+            if k == issue_key or k in anc:
+                # limit deps to within subgraph
+                deps = [d for d in nd.get("dependencies", []) if d == issue_key or d in anc]
+                sub_nodes[k] = {
+                    "assignee": nd.get("assignee"),
+                    "duration_days": int(max(1, nd.get("duration_days") or 1)),
+                    "dependencies": deps,
+                }
+
+        return {
+            "issue": issue_key,
+            "project_key": project_key,
+            "optimistic_days": int(eta.get("optimistic_days", 0)),
+            "pessimistic_days": int(eta.get("pessimistic_days", eta.get("optimistic_days", 0))),
+            "optimistic_schedule": eta.get("optimistic_schedule", []),
+            "pessimistic_schedule": eta.get("pessimistic_schedule", []),
+            "optimistic_critical_path": eta.get("optimistic_critical_path", []),
+            "pessimistic_blockers": eta.get("pessimistic_blockers", []),
+            "nodes": sub_nodes,
+            "summary": eta.get("summary"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("/jira/issue-eta-graph failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

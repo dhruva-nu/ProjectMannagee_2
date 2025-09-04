@@ -3,6 +3,7 @@ import JiraStatus, { type JiraStatusData } from './JiraStatus'
 import SprintStatus, { type SprintStatusData } from './SprintStatus'
 import UserCard, { type UserCardData } from './UserCard'
 import IssueList, { type IssueListData } from './IssueList'
+import EtaEstimate, { type EtaEstimateData } from './EtaEstimate'
 
 type Message = {
   role: 'user' | 'assistant' | 'system'
@@ -12,6 +13,7 @@ type Message = {
     | { type: 'sprint_status'; data: SprintStatusData }
     | { type: 'user_card'; data: UserCardData }
     | { type: 'issue_list'; data: IssueListData }
+    | { type: 'eta_estimate'; data: EtaEstimateData }
 }
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000'
@@ -26,6 +28,56 @@ export type ChatUiMessage =
   | { type: 'sprint_status'; data: SprintStatusData }
   | { type: 'user_card'; data: UserCardData }
   | { type: 'issue_list'; data: IssueListData }
+  | { type: 'eta_estimate'; data: EtaEstimateData }
+
+// Helper utilities to extract keys without regex
+function extractIssueKey(text: string): string | undefined {
+  const candidates: string[] = []
+  const parts = (text || '').split(/\s+/)
+  for (const raw of parts) {
+    // remove leading/trailing punctuation
+    const t = raw.replace(/^[-#@()\[\]{}.,:;!?'"`]+|[-#@()\[\]{}.,:;!?'"`]+$/g, '')
+    if (!t || t.indexOf('-') === -1) continue
+    const [left, right] = t.split('-', 2)
+    if (!left || !right) continue
+    // left must be uppercase letters/numbers and start with a letter; right must be digits
+    const leftOk = (() => {
+      if (!/[A-Z]/.test(left[0])) return false
+      for (let i = 0; i < left.length; i++) {
+        const c = left[i]
+        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) return false
+      }
+      return true
+    })()
+    const rightOk = (() => {
+      for (let i = 0; i < right.length; i++) {
+        const c = right[i]
+        if (!(c >= '0' && c <= '9')) return false
+      }
+      return right.length > 0
+    })()
+    if (leftOk && rightOk) candidates.push(`${left}-${right}`)
+  }
+  return candidates[0]
+}
+
+function extractProjectKey(text: string): string | undefined {
+  // Prefer from issue key if present
+  const ik = extractIssueKey(text)
+  if (ik && ik.includes('-')) return ik.split('-')[0]
+  const parts = (text || '').split(/\s+/)
+  for (const raw of parts) {
+    const t = raw.replace(/^[-#@()\[\]{}.,:;!?'"`]+|[-#@()\[\]{}.,:;!?'"`]+$/g, '')
+    if (!t) continue
+    let ok = true
+    for (let i = 0; i < t.length; i++) {
+      const c = t[i]
+      if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) { ok = false; break }
+    }
+    if (ok && /[A-Z]/.test(t[0])) return t
+  }
+  return undefined
+}
 
 const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) => void }>(function ChatBox(
   { onUiMessage },
@@ -54,17 +106,65 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       })
+      const rawBody = await res.text()
       let data: any = null
-      try { data = await res.json() } catch {}
+      try {
+        data = JSON.parse(rawBody)
+      } catch {
+        data = rawBody
+      }
+      // If it's still a string, try to strip simple code-fences and parse again
+      if (typeof data === 'string') {
+        let t = data.trim()
+        if (t.startsWith('```')) {
+          // Drop the first fence line (possibly ```json)
+          const firstNl = t.indexOf('\n')
+          if (firstNl !== -1) {
+            t = t.slice(firstNl + 1)
+          }
+          // Drop trailing fence if present
+          if (t.endsWith('```')) {
+            t = t.slice(0, -3)
+          }
+          t = t.trim()
+        }
+        try {
+          const reparsed = JSON.parse(t)
+          if (reparsed && typeof reparsed === 'object') {
+            data = reparsed
+          }
+        } catch {
+          // leave as string
+        }
+      }
       if (!res.ok) {
-        const errText = data?.detail || data?.error || `HTTP ${res.status}`
+        const errText = (data && (data.detail || data.error)) || `HTTP ${res.status}`
         throw new Error(errText)
       }
+      console.log('Response from /codinator/run-agent:', data);
 
-      // 1) Prefer structured UI directives from backend
-      if (data && data.ui === 'jira_status' && typeof data.key === 'string') {
+      // 1) Prefer structured UI directives from backend (ui or type)
+      const uiType: string | undefined = (data && (data.ui || data.type)) || undefined
+
+      if (uiType === 'jira_status') {
+        const issueKey: string | undefined =
+          (typeof (data as any)?.key === 'string' && (data as any).key) ||
+          (typeof (data as any)?.issue_key === 'string' && (data as any).issue_key) ||
+          (typeof (data as any)?.issueKey === 'string' && (data as any).issueKey) ||
+          ((data as any)?.data && typeof (data as any).data.key === 'string' ? (data as any).data.key : undefined) ||
+          ((data as any)?.data && typeof (data as any).data.issue_key === 'string' ? (data as any).data.issue_key : undefined) ||
+          ((data as any)?.data && typeof (data as any).data.issueKey === 'string' ? (data as any).data.issueKey : undefined) ||
+          extractIssueKey(userMsg.content || '')
+        console.debug('jira_status detected. Extracted issueKey =', issueKey, 'from payload:', data)
+        if (!issueKey) {
+          // If no key present, fall back to plain text
+          const raw = (data?.data && typeof data.data.text === 'string' ? data.data.text : '') || (typeof data?.response === 'string' ? data.response : '')
+          const assistantMsg: Message = { role: 'assistant', content: raw || 'No issue key found.' }
+          setMessages((prev) => [...prev, assistantMsg])
+          return
+        }
         const jurl = new URL(`${API_BASE}/jira/issue-status`)
-        jurl.searchParams.set('key', data.key)
+        jurl.searchParams.set('key', issueKey)
         const token = localStorage.getItem('access_token')
         const jres = await fetch(jurl.toString(), {
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -86,9 +186,22 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
         const uiMsg: Message = { role: 'assistant', ui }
         setMessages((prev) => [...prev, uiMsg])
         onUiMessage?.(ui)
-      } else if (data && data.ui === 'sprint_status' && typeof data.project_key === 'string') {
+      } else if (uiType === 'sprint_status') {
+        const projectKey: string | undefined =
+          (typeof (data as any)?.project_key === 'string' && (data as any).project_key) ||
+          (typeof (data as any)?.projectKey === 'string' && (data as any).projectKey) ||
+          ((data as any)?.data && typeof (data as any).data.project_key === 'string' ? (data as any).data.project_key : undefined) ||
+          ((data as any)?.data && typeof (data as any).data.projectKey === 'string' ? (data as any).data.projectKey : undefined) ||
+          extractProjectKey(userMsg.content || '')
+        console.debug('sprint_status detected. Extracted projectKey =', projectKey, 'from payload:', data)
+        if (!projectKey) {
+          const raw = (data?.data && typeof data.data.text === 'string' ? data.data.text : '') || (typeof data?.response === 'string' ? data.response : '')
+          const assistantMsg: Message = { role: 'assistant', content: raw || 'No project key found.' }
+          setMessages((prev) => [...prev, assistantMsg])
+          return
+        }
         const surl = new URL(`${API_BASE}/jira/sprint-status`)
-        surl.searchParams.set('project_key', data.project_key)
+        surl.searchParams.set('project_key', projectKey)
         const token = localStorage.getItem('access_token')
         const sres = await fetch(surl.toString(), {
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -111,7 +224,7 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
         const uiMsg: Message = { role: 'assistant', ui }
         setMessages((prev) => [...prev, uiMsg])
         onUiMessage?.(ui)
-      } else if (data && (data.ui === 'user_card' || data.type === 'user_card')) {
+      } else if (uiType === 'user_card') {
         // Support both shapes:
         // 1) { ui: 'user_card', name: '...', email: '...', avatarUrl: '...' }
         // 2) { ui: 'user_card', data: { name: '...', email: '...', avatarUrl: '...' } }
@@ -134,7 +247,7 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
         const uiMsg: Message = { role: 'assistant', ui }
         setMessages((prev) => [...prev, uiMsg])
         onUiMessage?.(ui)
-      } else if (data && data.ui === 'issue_list') {
+      } else if (uiType === 'issue_list') {
         // Support both shapes:
         // 1) { ui: 'issue_list', issues: [...], title? }
         // 2) { ui: 'issue_list', data: { issues: [...], title? } }
@@ -160,6 +273,56 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
         const uiMsg: Message = { role: 'assistant', ui }
         setMessages((prev) => [...prev, uiMsg])
         onUiMessage?.(ui)
+      } else if (uiType === 'eta_estimate') {
+        // Expect either { ui: 'eta_estimate', issue_key } or nested under data.issue_key
+        const issueKey: string | undefined =
+          (typeof (data as any)?.issue_key === 'string' && (data as any).issue_key) ||
+          (typeof (data as any)?.issueKey === 'string' && (data as any).issueKey) ||
+          ((data as any)?.data && typeof (data as any).data.issue_key === 'string' ? (data as any).data.issue_key : undefined) ||
+          ((data as any)?.data && typeof (data as any).data.issueKey === 'string' ? (data as any).data.issueKey : undefined) ||
+          extractIssueKey(userMsg.content || '')
+        if (!issueKey) {
+          const assistantMsg: Message = { role: 'assistant', content: 'No issue key found for ETA request.' }
+          setMessages((prev) => [...prev, assistantMsg])
+          return
+        }
+        const eurl = new URL(`${API_BASE}/jira/issue-eta-graph`)
+        eurl.searchParams.set('issue_key', issueKey)
+        const token = localStorage.getItem('access_token')
+        const eres = await fetch(eurl.toString(), {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        })
+        let edata: any = null
+        try { edata = await eres.json() } catch {}
+        if (!eres.ok) {
+          const errText = edata?.detail || edata?.error || `HTTP ${eres.status}`
+          throw new Error(errText)
+        }
+        // Normalize backend payload to EtaEstimateData
+        const uiData: EtaEstimateData = {
+          issue: String(edata.issue || issueKey),
+          project_key: String(edata.project_key || issueKey.split('-')[0] || ''),
+          optimistic_days: typeof edata.optimistic_days === 'number' ? edata.optimistic_days : 0,
+          pessimistic_days: typeof edata.pessimistic_days === 'number' ? edata.pessimistic_days : (typeof edata.optimistic_days === 'number' ? edata.optimistic_days : 0),
+          optimistic_critical_path: Array.isArray(edata.optimistic_critical_path) ? edata.optimistic_critical_path : [],
+          pessimistic_blockers: Array.isArray(edata.pessimistic_blockers) ? edata.pessimistic_blockers : [],
+          nodes: (edata.nodes && typeof edata.nodes === 'object') ? edata.nodes : {},
+          summary: typeof edata.summary === 'string' ? edata.summary : undefined,
+        }
+        const ui: ChatUiMessage = { type: 'eta_estimate', data: uiData }
+        const uiMsg: Message = { role: 'assistant', ui }
+        setMessages((prev) => [...prev, uiMsg])
+        onUiMessage?.(ui)
+      } else if (uiType === 'generic') {
+        // Generic directive – show provided text
+        const raw = (data?.data && typeof data.data.text === 'string' ? data.data.text : '') || (typeof data?.response === 'string' ? data.response : '')
+        const assistantMsg: Message = { role: 'assistant', content: raw || 'No response from agent' }
+        setMessages((prev) => [...prev, assistantMsg])
+      } else if (uiType) {
+        // Unknown UI type – show best-effort text
+        const raw = (data?.data && typeof data.data.text === 'string' ? data.data.text : '') || (typeof data?.response === 'string' ? data.response : '')
+        const assistantMsg: Message = { role: 'assistant', content: raw || `[${uiType}]` }
+        setMessages((prev) => [...prev, assistantMsg])
       } else {
         // Plain text fallback – backend decides UI; we only display text.
         const raw = (data?.response && String(data.response).trim()) || ''
@@ -223,8 +386,14 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
         {messages.map((m, idx) => (
           <div
             key={idx}
-            className={`p-2 rounded-lg max-w-[85%] whitespace-pre-wrap break-words leading-tight text-sm ${
-              m.role === 'user' ? 'bg-secondary-700 self-end' : m.role === 'assistant' ? 'bg-secondary-900 self-start border border-secondary-700' : 'bg-red-900 self-center'
+            className={`p-2 rounded-lg whitespace-pre-wrap break-words leading-tight text-sm ${
+              m.ui ? 'w-full max-w-[900px] md:max-w-[1100px]' : 'max-w-[700px]'
+            } ${
+              m.role === 'user'
+                ? `bg-secondary-700 ${m.ui ? 'self-center' : 'self-end'}`
+                : m.role === 'assistant'
+                ? `bg-secondary-900 ${m.ui ? 'self-center' : 'self-start'} border border-secondary-700`
+                : 'bg-red-900 self-center'
             }`}
           >
             {m.ui?.type === 'jira_status' ? (
@@ -235,6 +404,8 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
               <UserCard data={m.ui.data} />
             ) : m.ui?.type === 'issue_list' ? (
               <IssueList data={m.ui.data} />
+            ) : m.ui?.type === 'eta_estimate' ? (
+              <EtaEstimate data={m.ui.data} />
             ) : (
               m.content
             )}
