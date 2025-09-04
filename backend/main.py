@@ -23,6 +23,7 @@ from app.db.database import get_db
 import time
 import re
 from tools.github.repo_tools import list_todays_commits
+from app.commands import handle_cli_commands, _extract_jira_key
 import hmac
 import hashlib
 import base64
@@ -99,42 +100,7 @@ def _cache_put_issue_status(key: str, data: dict) -> None:
     except Exception:
         pass
 
-def _extract_jira_key(text: str) -> str | None:
-    """
-    Extract a plausible Jira key like ABC-123 from free-form text without using regex.
-    Rules:
-    - Case-insensitive detection, returns UPPERCASE key
-    - Project part: starts with a letter, followed by letters/digits (at least 1 char)
-    - Hyphen, then one or more digits
-    - Ignores surrounding punctuation
-    """
-    if not text:
-        return None
-    # Replace non token chars with spaces to split cleanly
-    buf = []
-    for ch in text:
-        if ch.isalnum() or ch in "-_":
-            buf.append(ch)
-        else:
-            buf.append(" ")
-    for raw in " ".join(buf).split():
-        token = raw.strip().strip(".,;:()[]{}<>\"'")
-        up = token.upper()
-        if "-" not in up:
-            continue
-        left, _, right = up.partition("-")
-        if not left or not right:
-            continue
-        # left must start with a letter and be alnum only
-        if not left[0].isalpha():
-            continue
-        if not all(c.isalnum() for c in left):
-            continue
-        # right must be digits
-        if not right.isdigit():
-            continue
-        return f"{left}-{right}"
-    return None
+
 
 def _b64url_encode(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
@@ -297,43 +263,10 @@ async def run_codinator_agent(
         if not effective_prompt or not effective_prompt.strip():
             raise HTTPException(status_code=422, detail="Missing 'prompt'. Provide it in JSON body or as query param ?prompt=")
 
-        # Pre-router: handle "--end day" to summarize today's commits from GitHub
-        # Regex use allowed per user request
-        if effective_prompt and re.search(r"--end\s+day\b", effective_prompt, re.IGNORECASE):
-            text_src = effective_prompt
-            repo: str | None = None
-            branch: str | None = None
-            # Try common syntaxes to specify repo and branch
-            # repo=owner/repo or repository=owner/repo or --repo owner/repo
-            m = re.search(r"(?:\brepo(?:sitory)?\b\s*[:=]\s*|--repo\s+)([\w.-]+/[\w.-]+)", text_src, re.IGNORECASE)
-            if m:
-                repo = m.group(1)
-            else:
-                # Fallback: detect first owner/repo pattern in text
-                m2 = re.search(r"\b([\w.-]+/[\w.-]+)\b", text_src)
-                if m2:
-                    repo = m2.group(1)
-            # branch name
-            mb = re.search(r"\bbranch\b\s*[:=]\s*([\w./-]+)|--branch\s+([\w./-]+)", text_src, re.IGNORECASE)
-            if mb:
-                branch = mb.group(1) or mb.group(2)
-
-            if not repo:
-                repo = os.getenv("GITHUB_DEFAULT_REPO")
-
-            if not repo:
-                # Ask user to specify repo
-                local_day_str = datetime.now().astimezone().strftime("%Y-%m-%d")
-                return {"response": (
-                    "To get your commits for today (" + local_day_str + ") please specify a repo.\n"
-                    "Examples:\n"
-                    "- --end day repo=owner/repo\n"
-                    "- --end day --repo owner/repo --branch main\n"
-                    "Or set env GITHUB_DEFAULT_REPO=owner/repo"
-                )}
-
-            summary = list_todays_commits(repo, branch)
-            return {"response": summary}
+        # Handle CLI-like commands
+        cli_response = handle_cli_commands(effective_prompt)
+        if cli_response:
+            return cli_response
 
         # Lightweight pre-router: handle simple Jira UI intents locally to avoid LLM/tool calls
         # Patterns like: "what is the status of issue ABC-123" or "jira status for ABC-123"
