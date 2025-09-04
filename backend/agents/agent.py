@@ -27,6 +27,8 @@ For Jira:
 - If the user provides a project_key, call jira_agent's explicit tools: 'summarize_current_sprint' or 'summarize_issues_in_sprint' with that parameter.
 - If the user does not provide a project_key, prefer jira_agent's memory-based tools: 'summarize_current_sprint_default' or 'summarize_issues_in_sprint_default'. Only ask for project_key if memory is empty.
 When using the 'list_repositories' tool, you must ask the user for the 'organization' as it is a required argument for that tool.
+For GitHub commit listing prompts (e.g., "list today's commits" or "show all commits made today"), transfer to github_repo_agent and call 'list_todays_commits(repo_full_name, branch?)'.
+Ask the user for the required 'repo_full_name' (format 'owner/repo') if not provided; 'branch' is optional.
 When using the 'answer_jira_query' tool, you must ask the user for the 'issue_key' and the 'query' (e.g., "when can i expect TESTPROJ-10 to be complete" or "why is TESTPROJ-10 stuck") as they are required arguments for that tool.
 
  For hypothetical sprint planning questions (e.g., "if I move ISSUE-123 to next sprint, when can I complete this sprint?"), transfer to jira_cpa_agent and call its planning tool. Collect required parameters:

@@ -14,7 +14,6 @@ import os
 import requests
 from requests.auth import HTTPBasicAuth
 import json
-import re
 from tools.jira.sprint_tools import _fetch_active_sprint, _fetch_issues_in_active_sprint
 from fastapi import Depends, status, Header
 from passlib.hash import bcrypt
@@ -22,7 +21,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.db.database import get_db
 from jose import jwt, JWTError
-import re
 import time
 
 
@@ -96,6 +94,43 @@ def _cache_put_issue_status(key: str, data: dict) -> None:
         _ISSUE_STATUS_CACHE[key] = (time.time(), data)
     except Exception:
         pass
+
+def _extract_jira_key(text: str) -> str | None:
+    """
+    Extract a plausible Jira key like ABC-123 from free-form text without using regex.
+    Rules:
+    - Case-insensitive detection, returns UPPERCASE key
+    - Project part: starts with a letter, followed by letters/digits (at least 1 char)
+    - Hyphen, then one or more digits
+    - Ignores surrounding punctuation
+    """
+    if not text:
+        return None
+    # Replace non token chars with spaces to split cleanly
+    buf = []
+    for ch in text:
+        if ch.isalnum() or ch in "-_":
+            buf.append(ch)
+        else:
+            buf.append(" ")
+    for raw in " ".join(buf).split():
+        token = raw.strip().strip(".,;:()[]{}<>\"'")
+        up = token.upper()
+        if "-" not in up:
+            continue
+        left, _, right = up.partition("-")
+        if not left or not right:
+            continue
+        # left must start with a letter and be alnum only
+        if not left[0].isalpha():
+            continue
+        if not all(c.isalnum() for c in left):
+            continue
+        # right must be digits
+        if not right.isdigit():
+            continue
+        return f"{left}-{right}"
+    return None
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
@@ -221,9 +256,8 @@ async def run_codinator_agent(
         if effective_prompt:
             prompt_lc = effective_prompt.lower()
             # Extract a plausible JIRA key (prefix-num)
-            m = re.search(r"\b([A-Z][A-Z0-9]+-\d+)\b", effective_prompt, flags=re.IGNORECASE)
-            if m and ("status" in prompt_lc) and ("issue" in prompt_lc or "jira" in prompt_lc):
-                issue_key = m.group(1)
+            issue_key = _extract_jira_key(effective_prompt)
+            if issue_key and ("status" in prompt_lc) and ("issue" in prompt_lc or "jira" in prompt_lc):
                 # Return a structured UI directive for the frontend to consume directly
                 logging.getLogger("api").info("/codinator/run-agent pre-router handled jira status for %s", issue_key)
                 return {"ui": "jira_status", "key": issue_key}
@@ -258,10 +292,17 @@ async def run_codinator_agent(
         # Attempt to parse final_response as JSON for UI directives
         parsed_json_data = None
         try:
-            # Try to extract JSON from markdown code block
-            match = re.search(r'```json\n(.*)\n```', final_response, re.DOTALL)
-            if match:
-                json_str = match.group(1)
+            # Try to extract JSON from markdown code block (no regex)
+            json_str = None
+            start = final_response.find("```json")
+            if start != -1:
+                # Move to the end of the first line after ```json
+                start_nl = final_response.find("\n", start)
+                if start_nl != -1:
+                    end = final_response.find("```", start_nl + 1)
+                    if end != -1:
+                        json_str = final_response[start_nl + 1:end]
+            if json_str is not None:
                 logger.debug("Extracted JSON string from markdown: %s", json_str)
                 parsed_json_data = json.loads(json_str)
             else:
