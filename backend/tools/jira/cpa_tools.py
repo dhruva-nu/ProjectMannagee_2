@@ -1,4 +1,5 @@
 import json
+from logging import log
 import os
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -334,7 +335,6 @@ def who_is_assigned(issue_key: str) -> dict:
         "avatarUrl": avatar_url,
         # You can add 'designation' or 'online' if you have a way to fetch them
     }
-
     return {"ui": "user_card", "data": user_card_data}
 
 def transition_issue_status(issue_key: str, new_status: str) -> str:

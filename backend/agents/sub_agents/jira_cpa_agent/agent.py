@@ -23,8 +23,8 @@ jira_cpa_agent = Agent(
     description="CPA sub-agent for answering Jira issue and sprint planning queries using context and project knowledge",
     instruction=(
         "You are a CPA sub-agent focused on Jira issue analysis and sprint planning.\n"
-        "- For blockers, call what_is_blocking(issue_key).\n"
-        "- For assignee, call who_is_assigned(issue_key).\n"
+        "- For blockers, you MUST call what_is_blocking(issue_key) and return ONLY the tool output.\n"
+        "- For assignee queries (e.g., 'who is assigned ISSUE-123'), you MUST call who_is_assigned(issue_key) and return ONLY the tool's JSON output, no prose. Do NOT answer in free text.\n"
         "- For generic issue Q&A, call answer_jira_query(issue_key, query).\n"
         "- For hypothetical sprint planning (e.g., moving an issue and projecting completion), call "
         "answer_sprint_hypothetical(project_key, issue_key, query). Ask for any missing required parameters."

@@ -111,13 +111,24 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
         const uiMsg: Message = { role: 'assistant', ui }
         setMessages((prev) => [...prev, uiMsg])
         onUiMessage?.(ui)
-      } else if (data && data.ui === 'user_card' && typeof data.name === 'string') {
+      } else if (data && (data.ui === 'user_card' || data.type === 'user_card')) {
+        // Support both shapes:
+        // 1) { ui: 'user_card', name: '...', email: '...', avatarUrl: '...' }
+        // 2) { ui: 'user_card', data: { name: '...', email: '...', avatarUrl: '...' } }
+        // 3) { type: 'user_card', data: { ... } } (normalized here too)
+        const payload = (data.data && typeof data.data === 'object') ? data.data : data
         const uiData: UserCardData = {
-          name: data.name,
-          designation: typeof data.designation === 'string' ? data.designation : undefined,
-          email: typeof data.email === 'string' ? data.email : undefined,
-          avatarUrl: typeof data.avatarUrl === 'string' ? data.avatarUrl : undefined,
-          online: typeof data.online === 'boolean' ? data.online : undefined,
+          name: String(payload.name || ''),
+          designation: typeof payload.designation === 'string' ? payload.designation : undefined,
+          email: typeof payload.email === 'string' ? payload.email : undefined,
+          avatarUrl: typeof payload.avatarUrl === 'string' ? payload.avatarUrl : undefined,
+          online: typeof payload.online === 'boolean' ? payload.online : undefined,
+        }
+        if (!uiData.name) {
+          // If name is missing, fall back to plain text rendering below
+          const assistantMsg: Message = { role: 'assistant', content: 'No assignee information available.' }
+          setMessages((prev) => [...prev, assistantMsg])
+          return
         }
         const ui: ChatUiMessage = { type: 'user_card', data: uiData }
         const uiMsg: Message = { role: 'assistant', ui }

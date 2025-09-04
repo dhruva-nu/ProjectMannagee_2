@@ -216,7 +216,7 @@ async def run_codinator_agent(
         if not effective_prompt or not effective_prompt.strip():
             raise HTTPException(status_code=422, detail="Missing 'prompt'. Provide it in JSON body or as query param ?prompt=")
 
-        # Lightweight pre-router: handle simple Jira status queries locally to avoid LLM/tool calls
+        # Lightweight pre-router: handle simple Jira UI intents locally to avoid LLM/tool calls
         # Patterns like: "what is the status of issue ABC-123" or "jira status for ABC-123"
         if effective_prompt:
             prompt_lc = effective_prompt.lower()
@@ -268,6 +268,19 @@ async def run_codinator_agent(
                 # If not in markdown, try to parse the whole response as JSON
                 logger.debug("Attempting to parse whole response as JSON: %s", final_response)
                 parsed_json_data = json.loads(final_response)
+
+            # If ADK wrapped the tool output under a single key (e.g., {"who_is_assigned_response": {...}}), unwrap it
+            if isinstance(parsed_json_data, dict) and "ui" not in parsed_json_data and "type" not in parsed_json_data:
+                if len(parsed_json_data.keys()) == 1:
+                    only_key = next(iter(parsed_json_data.keys()))
+                    inner_val = parsed_json_data.get(only_key)
+                    if isinstance(inner_val, dict):
+                        logger.debug("Unwrapped single-key tool response '%s'", only_key)
+                        parsed_json_data = inner_val
+
+            # Normalize {"type": "..."} to {"ui": "..."}
+            if isinstance(parsed_json_data, dict) and "type" in parsed_json_data and "ui" not in parsed_json_data:
+                parsed_json_data["ui"] = parsed_json_data.pop("type")
 
             if isinstance(parsed_json_data, dict) and "ui" in parsed_json_data:
                 logger.debug("Returning UI directive: %s", parsed_json_data)

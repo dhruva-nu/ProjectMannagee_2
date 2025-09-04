@@ -1,7 +1,8 @@
-import os
 from dotenv import load_dotenv
 from google.adk.agents import Agent
 from google.adk.tools.agent_tool import AgentTool
+from google.adk.tools import FunctionTool
+from tools.jira.cpa_tools import who_is_assigned
 from .sub_agents.jira_sprint_agent.agent import jira_sprint_agent
 from .sub_agents.github_repo_agent.agent import github_repo_agent
 from .sub_agents.jira_cpa_agent.agent import jira_cpa_agent
@@ -19,8 +20,8 @@ Your primary role is to coordinate between various specialized sub-agents, deleg
 
  IMPORTANT:
  - Do NOT call any low-level tool named 'transfer_to_agent' directly. It requires an 'agent_name' argument and is not meant for direct use.
- - Instead, always use the explicit sub-agent tools listed below (e.g., jira_sprint_agent, jira_cpa_agent, cpa_engine_agent, github_repo_agent) with their required arguments.
- - For simple Jira issue status queries, respond with the UI directive JSON as specified below; do not call tools unnecessarily.
+  - Instead, use the explicit tools listed below. For assignee lookups, you MUST call the direct tool 'who_is_assigned(issue_key)' and return ONLY the tool's JSON.
+ - For simple Jira intents, follow the Generative UI directives below and avoid calling unrelated tools or sub-agents.
 
 For Jira:
 - If the user provides a project_key, call jira_agent's explicit tools: 'summarize_current_sprint' or 'summarize_issues_in_sprint' with that parameter.
@@ -33,7 +34,7 @@ When using the 'answer_jira_query' tool, you must ask the user for the 'issue_ke
  - issue_key (e.g., TESTPROJ-12)
  - query (the user's question)
  Use jira_cpa_agent's 'answer_sprint_hypothetical(project_key, issue_key, query)'.
- For assignee lookups, use jira_cpa_agent's 'who_is_assigned(issue_key)'. For blockers, use 'what_is_blocking(issue_key)'.
+ For assignee lookups, call the direct tool 'who_is_assigned(issue_key)' and return its JSON only. For blockers, use jira_cpa_agent's 'what_is_blocking(issue_key)'.
 
  For a concise Critical Path Analysis summary of the current sprint for a Jira project, call cpa_engine_agent's 'summarize_current_sprint_cpa(project_key)'. If the user doesn't provide project_key, ask for it explicitly.
  For queries about issues assigned to a specific user (e.g., "how many tasks do I have assigned?", "show me issues assigned to USER_A"), use jira_sprint_agent's 'get_issues_assigned_to_user(username)' tool. The response should be a JSON object in the format: {"ui": "issue_list", "data": {"title": "<title_string>", "issues": [{"key": "<issue_key>", "summary": "<summary_string>", "status": "<status_string>", "priority": "<priority_string>", "url": "<url_string>"}, ...]}}.
@@ -47,12 +48,15 @@ When using the 'answer_jira_query' tool, you must ask the user for the 'issue_ke
  Generative UI directive:
  - When the user asks for the Jira status for a specific issue (e.g., "JIRA status for issue PROJ-123"), respond ONLY with a single-line JSON object, no prose, in the exact format:
    {"ui": "jira_status", "key": "PROJ-123"}
+ - When the user asks who is assigned to a specific issue (e.g., "who is assigned TESTPROJ-16", "assignee for PROJ-123"), call the direct 'who_is_assigned(issue_key)' tool and respond ONLY with the tool's JSON output, no prose. Do not call any other tools or sub-agents for this intent.
  - When the user asks for the list of Jira issues in the current sprint (e.g., "JIRA issues in the current sprint"), respond ONLY with a single-line JSON object, no prose, in the exact format:
    {"ui": "issue_list", "data": <output_of_get_issues_assigned_to_user>}
  - Do not include analysis or extra text around the JSON. If the issue key is unclear, ask a clarifying question in plain text.
     """,
     sub_agents=[jira_sprint_agent, github_repo_agent, jira_cpa_agent, cpa_engine_agent],
     tools=[
+        # Prefer direct tool for assignee lookups to avoid free-text answers
+        FunctionTool(who_is_assigned),
         AgentTool(jira_sprint_agent),
         AgentTool(github_repo_agent),
         AgentTool(jira_cpa_agent),
