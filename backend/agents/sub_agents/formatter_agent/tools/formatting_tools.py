@@ -71,12 +71,31 @@ def format_user_card(user_data: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Structured JSON for user_card UI component
     """
+    # Normalize common variants from different sources into frontend-consumed keys
+    name = (
+        user_data.get("name")
+        or user_data.get("displayName")
+        or user_data.get("fullName")
+        or ""
+    )
+    email = (
+        user_data.get("email")
+        or user_data.get("emailAddress")
+        or user_data.get("mail")
+        or None
+    )
+    avatar = (
+        user_data.get("avatarUrl")
+        or (user_data.get("avatar") or {}).get("url")
+        or None
+    )
+
     return {
         "ui": "user_card",
         "data": {
-            "displayName": user_data.get("displayName", ""),
-            "emailAddress": user_data.get("emailAddress", ""),
-            "avatarUrl": user_data.get("avatarUrl", ""),
+            "name": name,
+            "email": email,
+            "avatarUrl": avatar,
             "accountId": user_data.get("accountId", ""),
             "designation": user_data.get("designation", ""),
             "online": user_data.get("online", False)

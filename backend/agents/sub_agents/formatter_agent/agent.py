@@ -1,18 +1,4 @@
 from google.adk.agents import Agent
-from google.adk.tools import FunctionTool
-from .tools.formatting_tools import (
-    format_jira_status,
-    format_issue_list,
-    format_user_card,
-    format_assignee_response,
-    format_eta_response,
-    format_cpa_summary,
-    format_sprint_summary,
-    format_issue_details,
-    format_dependency_graph,
-    format_error_response,
-    format_generic_response
-)
 
 """
 This module defines `formatter_agent`, a specialized Agent responsible for 
@@ -22,42 +8,22 @@ This centralizes all formatting logic and removes formatting responsibilities fr
 
 formatter_agent = Agent(
     name="formatter_agent",
-    model="gemini-2.0-flash",
-    description="Formatting agent that converts raw data from other agents into structured UI-ready formats",
+    model="gemini-1.5-flash",
+    description="Formatting agent that converts raw strings from other agents into structured UI-ready JSON.",
     instruction=(
-        "You are a specialized formatting agent responsible for converting raw data "
-        "from other agents into structured, UI-ready formats. Your role is to:\n"
-        "1. Take raw data and user context as input\n"
-        "2. Apply appropriate formatting based on the data type and user intent\n"
-        "3. Return consistently structured JSON responses for the frontend\n"
-        "4. Handle error cases with appropriate error formatting\n"
-        "5. Ensure all responses follow the established UI directive patterns\n\n"
-        "Available formatting types:\n"
-        "- jira_status: For Jira issue status queries\n"
-        "- issue_list: For lists of Jira issues\n"
-        "- user_card: For user information display\n"
-        "- assignee_response: For assignee lookup results\n"
-        "- eta_response: For ETA/timeline estimates\n"
-        "- cpa_summary: For Critical Path Analysis summaries\n"
-        "- sprint_summary: For sprint overview data\n"
-        "- issue_details: For detailed issue information\n"
-        "- dependency_graph: For issue dependency visualizations\n"
-        "- error_response: For error handling\n"
-        "- generic_response: For general data formatting\n\n"
-        "Always choose the most appropriate formatting function based on the data type and user intent."
+        "You are a dedicated formatting agent. You will receive a prompt containing two parts:\n" 
+        "1. 'Original User Input': The user's initial query.\n" 
+        "2. 'Raw Text/Tool Output': The raw text response from another agent or tool output.\n\n" 
+        "Your task:\n" 
+        "1) Based on both the 'Original User Input' and the 'Raw Text/Tool Output', decide the best UI directive (the 'ui' field) to format the response.\n" 
+        "2) Return a SINGLE JSON object with a top-level 'ui' key and a 'data' object when applicable.\n" 
+        "3) If the 'Raw Text/Tool Output' already contains JSON, parse it mentally and normalize it to our UI schema.\n" 
+        "4) If it's plain text, wrap it in a sensible UI type (e.g., 'generic' or a more specific directive).\n" 
+        "5) Do not include any prose outside the JSON. Output only the JSON object.\n\n" 
+        "Specifically, if the 'Original User Input' contains phrases like \"who is assigned to\", \"who assigned the issue\", \"assignee of\", or similar queries about a person, and the 'Raw Text/Tool Output' contains information about a user (e.g., name, email, avatarUrl), you should format the response with the 'user_card' UI directive. Ensure the 'data' object for 'user_card' includes 'name', 'email', and 'avatarUrl' if available.\n\n"        "Common UI types you may use: 'jira_status', 'issue_list', 'user_card', 'assignee', 'eta_estimate',\n" 
+        "'cpa_summary', 'sprint_summary', 'issue_details', 'dependency_graph', 'error', 'generic'.\n\n" 
+        "Validation: Always ensure the final output is valid JSON (no trailing commas, no code fences)."
     ),
-    tools=[
-        FunctionTool(format_jira_status),
-        FunctionTool(format_issue_list),
-        FunctionTool(format_user_card),
-        FunctionTool(format_assignee_response),
-        FunctionTool(format_eta_response),
-        FunctionTool(format_cpa_summary),
-        FunctionTool(format_sprint_summary),
-        FunctionTool(format_issue_details),
-        FunctionTool(format_dependency_graph),
-        FunctionTool(format_error_response),
-        FunctionTool(format_generic_response),
-    ],
+    tools=[],
     sub_agents=[],
 )

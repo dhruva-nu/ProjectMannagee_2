@@ -329,7 +329,8 @@ async def run_codinator_agent(
         message = genai_types.Content(role="user", parts=[genai_types.Part(text=effective_prompt)])
 
         final_response = ""
-        logger.debug("Starting runner.run_async for prompt: %s", effective_prompt)
+        # Log core agent invocation and prompt
+        logger.info("[core agent] invoking with prompt: %s", effective_prompt)
         with anyio.move_on_after(45) as cancel_scope:  # 45s timeout
             async for event in runner.run_async(
                 user_id=user_id,
@@ -339,7 +340,8 @@ async def run_codinator_agent(
                 if event.is_final_response():
                     if event.content and event.content.parts:
                         final_response = "".join(part.text for part in event.content.parts if part.text)
-                    logger.debug("Runner produced final_response (raw): %s", final_response)
+                    # Log the core agent's final response
+                    logger.info("[core agent] final response: %s", final_response)
                     break  # Exit after getting the final response
 
         logger.debug("Finished runner.run_async. final_response is empty: %s", not final_response)
@@ -351,52 +353,8 @@ async def run_codinator_agent(
             logger.error("/codinator/run-agent empty response from agent")
             raise HTTPException(status_code=502, detail="Empty response from agent")
 
-        logger.info("/codinator/run-agent success")
-        
-        # Attempt to parse final_response as JSON for UI directives
-        parsed_json_data = None
-        try:
-            # Try to extract JSON from markdown code block (no regex)
-            json_str = None
-            start = final_response.find("```json")
-            if start != -1:
-                # Move to the end of the first line after ```json
-                start_nl = final_response.find("\n", start)
-                if start_nl != -1:
-                    end = final_response.find("```", start_nl + 1)
-                    if end != -1:
-                        json_str = final_response[start_nl + 1:end]
-            if json_str is not None:
-                logger.debug("Extracted JSON string from markdown: %s", json_str)
-                parsed_json_data = json.loads(json_str)
-            else:
-                # If not in markdown, try to parse the whole response as JSON
-                logger.debug("Attempting to parse whole response as JSON: %s", final_response)
-                parsed_json_data = json.loads(final_response)
-
-            # If ADK wrapped the tool output under a single key (e.g., {"who_is_assigned_response": {...}}), unwrap it
-            if isinstance(parsed_json_data, dict) and "ui" not in parsed_json_data and "type" not in parsed_json_data:
-                if len(parsed_json_data.keys()) == 1:
-                    only_key = next(iter(parsed_json_data.keys()))
-                    inner_val = parsed_json_data.get(only_key)
-                    if isinstance(inner_val, dict):
-                        logger.debug("Unwrapped single-key tool response '%s'", only_key)
-                        parsed_json_data = inner_val
-
-            # Normalize {"type": "..."} to {"ui": "..."}
-            if isinstance(parsed_json_data, dict) and "type" in parsed_json_data and "ui" not in parsed_json_data:
-                parsed_json_data["ui"] = parsed_json_data.pop("type")
-
-            if isinstance(parsed_json_data, dict) and "ui" in parsed_json_data:
-                logger.debug("Returning UI directive: %s", parsed_json_data)
-                # If it's a UI directive, return it directly
-                return parsed_json_data
-        except json.JSONDecodeError as e:
-            logger.debug("JSONDecodeError: %s. Response was not valid JSON. Raw response: %s", e, final_response)
-            # Not a valid JSON response, treat as plain text
-            pass
-
-        logger.debug("Returning plain text response: %s", final_response)
+        logger.info("/codinator/run-agent success; returning plain response")
+        # Return the plain LLM response without additional formatting
         return {"response": final_response}
 
     except HTTPException:

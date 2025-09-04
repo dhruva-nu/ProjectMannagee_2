@@ -38,6 +38,15 @@ def _to_date_set(dates: Optional[List[str]]) -> Set[date]:
     return out
 
 
+def _next_working_day(d: date, working_days: Set[int], holidays: Set[date]) -> date:
+    """Return the same date if it is a working day (and not a holiday), otherwise the next working day."""
+    cur = d
+    while True:
+        if cur.weekday() in working_days and cur not in holidays:
+            return cur
+        cur = cur + timedelta(days=1)
+
+
 def current_sprint_cpa_timeline(
     project_key: str,
     start_on: Optional[str] = None,
@@ -54,7 +63,7 @@ def current_sprint_cpa_timeline(
 
     Params:
     - start_on: ISO date string to force a start date. If None, use sprint start; else today.
-    - working_days: weekdays considered working (0=Mon..6=Sun). Default: all days treated as working.
+    - working_days: weekdays considered working (0=Mon..6=Sun). Default: weekdays (Mon–Fri).
     - global_holidays: list of ISO dates treated as non-working for all.
     - holidays_by_user: mapping of user displayName -> list of ISO dates of unavailability.
     """
@@ -65,8 +74,8 @@ def current_sprint_cpa_timeline(
     start_dt = _parse_iso_date(start_on) if start_on else None
     base_start = sprint_start or start_dt or datetime.utcnow().date()
 
-    # Working calendar
-    working_days_set: Set[int] = set(working_days) if working_days is not None else {0,1,2,3,4,5,6}
+    # Working calendar (default to weekdays Mon-Fri)
+    working_days_set: Set[int] = set(working_days) if working_days is not None else {0,1,2,3,4}
     global_hols_set: Set[date] = _to_date_set(global_holidays)
 
     # Prepare per-assignee queues
@@ -112,7 +121,8 @@ def current_sprint_cpa_timeline(
         current = base_start
         user_sched: List[dict] = []
         for t in tasks:
-            start_d = current
+            # Align start to next working day for this user
+            start_d = _next_working_day(current, working_days_set, user_holidays)
             end_d = _advance_working_days(start_d, t["estimated_days"], working_days_set, user_holidays)
             # Next task starts the day after end_d
             current = end_d + timedelta(days=1)
@@ -178,8 +188,8 @@ def sprint_completion_if_issue_removed(
     start_dt = _parse_iso_date(start_on) if start_on else None
     base_start = sprint_start or start_dt or datetime.utcnow().date()
 
-    # Working calendar
-    working_days_set: Set[int] = set(working_days) if working_days is not None else {0,1,2,3,4,5,6}
+    # Working calendar (default to weekdays Mon-Fri)
+    working_days_set: Set[int] = set(working_days) if working_days is not None else {0,1,2,3,4}
     global_hols_set: Set[date] = _to_date_set(global_holidays)
 
     # Prepare per-assignee queues excluding the removed issue
@@ -221,7 +231,7 @@ def sprint_completion_if_issue_removed(
         current = base_start
         user_sched: List[dict] = []
         for t in tasks:
-            start_d = current
+            start_d = _next_working_day(current, working_days_set, user_holidays)
             end_d = _advance_working_days(start_d, t["estimated_days"], working_days_set, user_holidays)
             current = end_d + timedelta(days=1)
             entry = {
@@ -287,8 +297,8 @@ def estimate_issue_completion_in_current_sprint(
     start_dt = _parse_iso_date(start_on) if start_on else None
     base_start = sprint_start or start_dt or datetime.utcnow().date()
 
-    # Working calendar
-    working_days_set: Set[int] = set(working_days) if working_days is not None else {0,1,2,3,4,5,6}
+    # Working calendar (default to weekdays Mon-Fri)
+    working_days_set: Set[int] = set(working_days) if working_days is not None else {0,1,2,3,4}
     global_hols_set: Set[date] = _to_date_set(global_holidays)
 
     # Find the target issue and its assignee
@@ -360,7 +370,7 @@ def estimate_issue_completion_in_current_sprint(
     
 
     for t in pending_tasks:
-        sdt = current
+        sdt = _next_working_day(current, working_days_set, user_holidays)
         edt = _advance_working_days(sdt, t["estimated_days"], working_days_set, user_holidays)
         current = edt + timedelta(days=1)
         entry = {

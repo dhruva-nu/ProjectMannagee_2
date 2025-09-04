@@ -207,7 +207,7 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
   }
 
   return (
-    <div className="fixed top-4 right-4 w-80 h-[80vh] flex flex-col bg-secondary-800 border border-secondary-600 rounded-xl overflow-hidden shadow-xl z-50">
+    <div className="flex-grow flex flex-col bg-secondary-800 border border-secondary-600"> {/* Adjusted styling */}
       <div className="flex items-center justify-between p-3 border-b border-secondary-600">
         <div className="text-sm opacity-90">Chat</div>
         <select
