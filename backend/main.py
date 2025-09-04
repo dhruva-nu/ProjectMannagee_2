@@ -20,8 +20,12 @@ from passlib.hash import bcrypt
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.db.database import get_db
-from jose import jwt, JWTError
 import time
+import re
+from tools.github.repo_tools import list_todays_commits
+import hmac
+import hashlib
+import base64
 
 
 
@@ -132,11 +136,51 @@ def _extract_jira_key(text: str) -> str | None:
         return f"{left}-{right}"
     return None
 
+def _b64url_encode(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
+
+def _b64url_decode(s: str) -> bytes:
+    padding = '=' * ((4 - len(s) % 4) % 4)
+    return base64.urlsafe_b64decode(s + padding)
+
+def _jwt_encode_hs256(payload: dict, key: str) -> str:
+    header = {"alg": "HS256", "typ": "JWT"}
+    header_b64 = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+    sig = hmac.new(key.encode("utf-8"), signing_input, hashlib.sha256).digest()
+    sig_b64 = _b64url_encode(sig)
+    return f"{header_b64}.{payload_b64}.{sig_b64}"
+
+def _jwt_decode_hs256(token: str, key: str) -> dict:
+    try:
+        header_b64, payload_b64, sig_b64 = token.split(".")
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Malformed token")
+    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+    expected_sig = hmac.new(key.encode("utf-8"), signing_input, hashlib.sha256).digest()
+    if not hmac.compare_digest(expected_sig, _b64url_decode(sig_b64)):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token signature")
+    try:
+        payload = json.loads(_b64url_decode(payload_b64))
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+    # exp check (exp in seconds since epoch)
+    exp = payload.get("exp")
+    if exp is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing exp")
+    now_sec = int(datetime.now(timezone.utc).timestamp())
+    if not isinstance(exp, (int, float)):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid exp in token")
+    if now_sec >= int(exp):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+    return payload
+
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    expire_dt = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": int(expire_dt.timestamp())})
+    return _jwt_encode_hs256(to_encode, SECRET_KEY)
 
 def _unauthorized(detail: str = "Not authenticated"):
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
@@ -146,7 +190,7 @@ def get_current_user(authorization: str | None = Header(default=None), db: Sessi
         _unauthorized("Missing bearer token")
     token = authorization.split(" ", 1)[1].strip()
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = _jwt_decode_hs256(token, SECRET_KEY)
         username: str | None = payload.get("sub")
         if not username:
             _unauthorized("Invalid token payload")
@@ -157,7 +201,9 @@ def get_current_user(authorization: str | None = Header(default=None), db: Sessi
         if not user_row:
             _unauthorized("User not found")
         return User(id=user_row.id, username=user_row.username, hashed_password=user_row.hashed_password, skills=user_row.skills or {})
-    except JWTError:
+    except HTTPException:
+        raise
+    except Exception:
         _unauthorized("Invalid or expired token")
 
 @app.get("/")
@@ -250,6 +296,44 @@ async def run_codinator_agent(
         logger.debug("Received prompt: %s", effective_prompt)
         if not effective_prompt or not effective_prompt.strip():
             raise HTTPException(status_code=422, detail="Missing 'prompt'. Provide it in JSON body or as query param ?prompt=")
+
+        # Pre-router: handle "--end day" to summarize today's commits from GitHub
+        # Regex use allowed per user request
+        if effective_prompt and re.search(r"--end\s+day\b", effective_prompt, re.IGNORECASE):
+            text_src = effective_prompt
+            repo: str | None = None
+            branch: str | None = None
+            # Try common syntaxes to specify repo and branch
+            # repo=owner/repo or repository=owner/repo or --repo owner/repo
+            m = re.search(r"(?:\brepo(?:sitory)?\b\s*[:=]\s*|--repo\s+)([\w.-]+/[\w.-]+)", text_src, re.IGNORECASE)
+            if m:
+                repo = m.group(1)
+            else:
+                # Fallback: detect first owner/repo pattern in text
+                m2 = re.search(r"\b([\w.-]+/[\w.-]+)\b", text_src)
+                if m2:
+                    repo = m2.group(1)
+            # branch name
+            mb = re.search(r"\bbranch\b\s*[:=]\s*([\w./-]+)|--branch\s+([\w./-]+)", text_src, re.IGNORECASE)
+            if mb:
+                branch = mb.group(1) or mb.group(2)
+
+            if not repo:
+                repo = os.getenv("GITHUB_DEFAULT_REPO")
+
+            if not repo:
+                # Ask user to specify repo
+                local_day_str = datetime.now().astimezone().strftime("%Y-%m-%d")
+                return {"response": (
+                    "To get your commits for today (" + local_day_str + ") please specify a repo.\n"
+                    "Examples:\n"
+                    "- --end day repo=owner/repo\n"
+                    "- --end day --repo owner/repo --branch main\n"
+                    "Or set env GITHUB_DEFAULT_REPO=owner/repo"
+                )}
+
+            summary = list_todays_commits(repo, branch)
+            return {"response": summary}
 
         # Lightweight pre-router: handle simple Jira UI intents locally to avoid LLM/tool calls
         # Patterns like: "what is the status of issue ABC-123" or "jira status for ABC-123"

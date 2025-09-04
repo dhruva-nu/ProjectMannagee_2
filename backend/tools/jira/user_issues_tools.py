@@ -58,7 +58,7 @@ def get_issues_assigned_to_user(username: str) -> str:
                 "summary": fields.get("summary"),
                 "status": fields.get("status", {}).get("name"),
                 "priority": fields.get("priority", {}).get("name"),
-                "url": f"{jira_server}/browse/{issue.get("key")}",
+                "url": f"{jira_server}/browse/{issue.get('key')}",
             })
         
         start_at += len(issues)
