@@ -43,7 +43,10 @@ except ModuleNotFoundError:
 import hmac
 import hashlib
 import base64
-
+try:
+    from backend import config
+except ModuleNotFoundError:
+    import config
 
 
 app = FastAPI()
@@ -82,24 +85,20 @@ formatter_runner = Runner(app_name="ProjectMannagee-Formatter", agent=formatter_
 # Enable CORS for local frontend dev server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "*",  # widen during development; consider restricting in production
-    ],
+    allow_origins=config.CORS_ALLOW_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # JWT configuration
-SECRET_KEY = os.getenv("JWT_SECRET", "dev-secret-change-me")
+SECRET_KEY = config.JWT_SECRET
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "3600"))
+ACCESS_TOKEN_EXPIRE_MINUTES = config.ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Simple in-memory cache for Jira issue status to reduce repeated calls
 _ISSUE_STATUS_CACHE: dict[str, tuple[float, dict]] = {}
-_ISSUE_STATUS_TTL_SECONDS = int(os.getenv("ISSUE_STATUS_TTL_SECONDS", "30"))
+_ISSUE_STATUS_TTL_SECONDS = config.ISSUE_STATUS_TTL_SECONDS
 
 def _cache_get_issue_status(key: str) -> dict | None:
     try:
@@ -280,7 +279,7 @@ async def run_codinator_agent(
         session_id = f"session_{anyio.current_time()}"
         user_id = str(current_user.id)
 
-        await session_service.create_session(app_name=runner.app_name, user_id=user_id, session_id=session_id)
+        session_service.create_session(app_name=runner.app_name, user_id=user_id, session_id=session_id)
 
         # Accept prompt from either JSON body or query/form parameters
         effective_prompt = prompt or (request.prompt if request else None)
@@ -297,65 +296,14 @@ async def run_codinator_agent(
         if cli_response:
             return cli_response
 
-        # Lightweight pre-router: handle simple Jira UI intents locally to avoid LLM/tool calls
-        # Patterns like: "what is the status of issue ABC-123" or "jira status for ABC-123"
-        if core_prompt:
-            prompt_lc = core_prompt.lower()
-            # Extract a plausible JIRA key (prefix-num)
-            issue_key = _extract_jira_key(core_prompt)
-            if issue_key and ("status" in prompt_lc) and ("issue" in prompt_lc or "jira" in prompt_lc):
-                # Return a structured UI directive for the frontend to consume directly
-                logging.getLogger("api").info("/codinator/run-agent pre-router handled jira status for %s", issue_key)
-                return {"ui": "jira_status", "key": issue_key}
-            # Handle: ETA queries, e.g.,
-            # - "when can I expect issue <KEY> [to be] complete"
-            # - "when can I expect issue <KEY>"
-            # - "eta for <KEY>"
-            is_eta_like = False
-            if issue_key:
-                # Accept natural variants without the word 'issue'
-                if ("expect" in prompt_lc):
-                    is_eta_like = True
-                elif ("eta" in prompt_lc and (issue_key in prompt_lc or "issue" in prompt_lc)):
-                    is_eta_like = True
-                elif ("done" in prompt_lc or "complete" in prompt_lc):
-                    is_eta_like = True
-            if is_eta_like:
-                # Return structured UI directive; frontend will fetch details from /jira/issue-eta-graph
-                project_key = issue_key.split('-', 1)[0] if '-' in issue_key else None
-                if not project_key:
-                    raise HTTPException(status_code=422, detail="Could not infer project_key from issue_key")
-                logging.getLogger("api").info("/codinator/run-agent pre-router handled jira ETA directive for %s", issue_key)
-                return {"ui": "eta_estimate", "issue_key": issue_key}
-
-            # Handle: sprint completion if removing an issue
-            # e.g., "if I remove issue TESTPROJ-12, when can I expect to complete the sprint"
-            if issue_key and ("remove" in prompt_lc or "exclude" in prompt_lc) and ("sprint" in prompt_lc) and ("complete" in prompt_lc or "finish" in prompt_lc or "expect" in prompt_lc):
-                try:
-                    try:
-                        from tools.cpa.engine.sprint_timeline import sprint_completion_if_issue_removed
-                    except ModuleNotFoundError:
-                        from backend.tools.cpa.engine.sprint_timeline import sprint_completion_if_issue_removed
-                    project_key = issue_key.split('-', 1)[0] if '-' in issue_key else None
-                    if not project_key:
-                        raise HTTPException(status_code=422, detail="Could not infer project_key from issue_key")
-                    logging.getLogger("api").info("/codinator/run-agent pre-router handled sprint removal impact for %s", issue_key)
-                    result = sprint_completion_if_issue_removed(project_key=project_key, removed_issue_key=issue_key)
-                    # Return as UI directive type for consistency
-                    result["ui"] = "sprint_removal_impact"
-                    return result
-                except HTTPException:
-                    raise
-                except Exception as e:
-                    logging.getLogger("api").exception("sprint removal impact failed: %s", e)
-                    # Fall through to full agent if error
+        # All queries now go through the agent system - no hardcoded routing
 
         message = genai_types.Content(role="user", parts=[genai_types.Part(text=core_prompt)])
 
         final_response = ""
         # Log core agent invocation and prompt
         logger.info("[core agent] invoking with prompt: %s", core_prompt)
-        with anyio.move_on_after(45) as cancel_scope:  # 45s timeout
+        with anyio.move_on_after(config.CORE_AGENT_TIMEOUT_SECONDS) as cancel_scope:  # 45s timeout
             async for event in runner.run_async(
                 user_id=user_id,
                 session_id=session_id,
@@ -387,11 +335,11 @@ async def run_codinator_agent(
 
         # Ensure a session exists for the formatter app
         formatter_session_id = f"{session_id}-formatter"
-        await session_service.create_session(app_name=formatter_runner.app_name, user_id=user_id, session_id=formatter_session_id)
+        session_service.create_session(app_name=formatter_runner.app_name, user_id=user_id, session_id=formatter_session_id)
 
         formatted_text = ""
         logger.info("[formatter agent] invoking to structure UI output")
-        with anyio.move_on_after(20) as fmt_cancel_scope:  # shorter timeout for formatting
+        with anyio.move_on_after(config.FORMATTER_AGENT_TIMEOUT_SECONDS) as fmt_cancel_scope:  # shorter timeout for formatting
             async for event in formatter_runner.run_async(
                 user_id=user_id,
                 session_id=formatter_session_id,
@@ -488,7 +436,7 @@ async def jira_issue_status(key: str = Query(..., description="Jira issue key, e
 
         # Normalize comments to a simple list of strings (author: body)
         normalized_comments = []
-        for c in comments[:10]:
+        for c in comments[:config.JIRA_COMMENTS_LIMIT]:
             author = (c.get("author") or {}).get("displayName") or "Unknown"
             body = c.get("body")
             if isinstance(body, dict) and "content" in body:
@@ -545,7 +493,7 @@ async def jira_sprint_status(project_key: str = Query(..., description="Jira pro
         issues = data.get("issues", [])
 
         total_issues = len(issues)
-        completed_issues = sum(1 for issue in issues if issue.get("status") == "Done") # Assuming "Done" is the completed status
+        completed_issues = sum(1 for issue in issues if issue.get("status") == config.JIRA_COMPLETED_STATUS) # Assuming "Done" is the completed status
 
         return {
             "name": sprint_info.get("name"),
@@ -658,4 +606,4 @@ async def jira_base_url(current_user: User = Depends(get_current_user)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=config.UVICORN_HOST, port=config.UVICORN_PORT)
