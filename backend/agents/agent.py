@@ -2,7 +2,10 @@ from dotenv import load_dotenv
 from google.adk.agents import Agent
 from google.adk.tools.agent_tool import AgentTool
 from google.adk.tools import FunctionTool
-from tools.jira.cpa_tools import who_is_assigned, answer_jira_query
+try:
+    from tools.jira.cpa_tools import who_is_assigned, answer_jira_query
+except ModuleNotFoundError:
+    from backend.tools.jira.cpa_tools import who_is_assigned, answer_jira_query
 from .sub_agents.jira_agent.agent import jira_agent
 from .sub_agents.github_repo_agent.agent import github_repo_agent
 from .sub_agents.jira_cpa_agent.agent import jira_cpa_agent
@@ -13,7 +16,7 @@ load_dotenv()
 agent = Agent(
     name="core",
     model="gemini-2.0-flash",
-    description="cordinates between all sub-agents to complete user tasks.",
+    description="Coordinates between all sub-agents to complete user tasks.",
     instruction="""
 You are the core agent of a multi-agent system designed to manage and complete user tasks efficiently. 
 Your primary role is to coordinate between various specialized sub-agents, delegating tasks based on their expertise and capabilities.

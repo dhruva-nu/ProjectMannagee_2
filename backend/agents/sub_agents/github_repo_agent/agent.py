@@ -1,6 +1,9 @@
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
-from tools.github.repo_tools import list_repositories, list_todays_commits
+try:
+    from tools.github.repo_tools import list_repositories, list_todays_commits
+except ModuleNotFoundError:
+    from backend.tools.github.repo_tools import list_repositories, list_todays_commits
 
 # Expose as a sub-agent that can be used via AgentTool by the root agent
 github_repo_agent = Agent(

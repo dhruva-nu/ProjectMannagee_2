@@ -2,18 +2,30 @@ from dotenv import load_dotenv
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
 
-
-from tools.cpa.engine import (
-        refresh_from_jira,
-        run_cpa,
-        get_critical_path,
-        get_task_slack,
-        get_project_duration,
-        summarize_current_sprint_cpa,
-        current_sprint_cpa_timeline,
-        estimate_issue_completion_in_current_sprint,
-        compute_eta_range_for_issue_current_sprint,
-    )
+try:
+    from tools.cpa.engine import (
+            refresh_from_jira,
+            run_cpa,
+            get_critical_path,
+            get_task_slack,
+            get_project_duration,
+            summarize_current_sprint_cpa,
+            current_sprint_cpa_timeline,
+            estimate_issue_completion_in_current_sprint,
+            compute_eta_range_for_issue_current_sprint,
+        )
+except ModuleNotFoundError:
+    from backend.tools.cpa.engine import (
+            refresh_from_jira,
+            run_cpa,
+            get_critical_path,
+            get_task_slack,
+            get_project_duration,
+            summarize_current_sprint_cpa,
+            current_sprint_cpa_timeline,
+            estimate_issue_completion_in_current_sprint,
+            compute_eta_range_for_issue_current_sprint,
+        )
 
 
 load_dotenv()

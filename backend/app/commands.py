@@ -5,43 +5,49 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Tuple, Optional
 import requests
-from tools.github.repo_tools import list_todays_commits
+try:
+    from tools.github.repo_tools import list_todays_commits
+except ModuleNotFoundError:
+    from backend.tools.github.repo_tools import list_todays_commits
 
 def _extract_jira_key(text: str) -> str | None:
     """
-    Extract a plausible Jira key like ABC-123 from free-form text without using regex.
-    Rules:
-    - Case-insensitive detection, returns UPPERCASE key
-    - Project part: starts with a letter, followed by letters/digits (at least 1 char)
-    - Hyphen, then one or more digits
-    - Ignores surrounding punctuation
+    Extract a plausible Jira key like ABC-123 from free-form text without regex.
+    Algorithm: scan characters; find a run starting with a letter, followed by alnum,
+    then a single '-', then one or more digits. Return the first match in UPPERCASE.
     """
     if not text:
         return None
-    # Replace non token chars with spaces to split cleanly
-    buf = []
-    for ch in text:
-        if ch.isalnum() or ch in "-_":
-            buf.append(ch)
-        else:
-            buf.append(" ")
-    for raw in " ".join(buf).split():
-        token = raw.strip().strip(".,;:()[]{}<>''\"")
-        up = token.upper()
-        if "-" not in up:
-            continue
-        left, _, right = up.partition("-")
-        if not left or not right:
-            continue
-        # left must start with a letter and be alnum only
-        if not left[0].isalpha():
-            continue
-        if not all(c.isalnum() for c in left):
-            continue
-        # right must be digits
-        if not right.isdigit():
-            continue
-        return f"{left}-{right}"
+    s = text
+    n = len(s)
+    i = 0
+    while i < n:
+        ch = s[i]
+        if ch.isalpha():
+            prev_ok = i == 0 or (not s[i-1].isalnum() and s[i-1] != '_')
+            if not prev_ok:
+                i += 1
+                continue
+            # collect project key (letters/digits), must start with this letter
+            j = i + 1
+            while j < n and s[j].isalnum():
+                j += 1
+            # need a hyphen next
+            if j < n and s[j] == '-':
+                k = j + 1
+                # collect digits
+                start_digits = k
+                while k < n and s[k].isdigit():
+                    k += 1
+                if k > start_digits:  # at least one digit
+                    left = s[i:j]
+                    right = s[start_digits:k]
+                    # ensure next char is a boundary (not alnum)
+                    next_ok = k >= n or (not s[k].isalnum())
+                    if next_ok:
+                        return f"{left.upper()}-{right}"
+            # move to next position after i to continue search
+        i += 1
     return None
 
 # ------- helpers: parsing & state -------
@@ -168,6 +174,8 @@ def _github_commits_since(repo_full_name: str, start_dt_local: datetime, branch:
         return "\n".join(lines)
     except requests.exceptions.RequestException as e:
         return f"An error occurred while fetching commits: {e}"
+    except Exception as e:
+        return f"An error occurred while fetching commits: {e}"
 
 def _jira_auth_headers():
     jira_server = os.getenv("JIRA_SERVER")
@@ -284,6 +292,8 @@ def handle_cli_commands(effective_prompt: str) -> dict | None:
         parts.append(f"- Working on: {jira['working']}")
         parts.append("")
         parts.append("GitHub commits:")
+        if repo:
+            parts.append(f"Repository: {repo}")
         parts.append(gh_summary)
         return {"response": "\n".join(parts)}
     

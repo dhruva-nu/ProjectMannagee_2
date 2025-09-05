@@ -2,15 +2,26 @@
 from dotenv import load_dotenv
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
-from tools.jira.cpa_tools import (
-    answer_jira_query,
-    what_is_blocking,
-    answer_sprint_hypothetical,
-    who_is_assigned,
-    transition_issue_status,
-    add_comment_to_issue,
-    print_issue_dependency_graph,
-)
+try:
+    from tools.jira.cpa_tools import (
+        answer_jira_query,
+        what_is_blocking,
+        answer_sprint_hypothetical,
+        who_is_assigned,
+        transition_issue_status,
+        add_comment_to_issue,
+        print_issue_dependency_graph,
+    )
+except ModuleNotFoundError:
+    from backend.tools.jira.cpa_tools import (
+        answer_jira_query,
+        what_is_blocking,
+        answer_sprint_hypothetical,
+        who_is_assigned,
+        transition_issue_status,
+        add_comment_to_issue,
+        print_issue_dependency_graph,
+    )
 
 """
 This module defines `jira_cpa_agent`, an orchestrating Agent that wraps

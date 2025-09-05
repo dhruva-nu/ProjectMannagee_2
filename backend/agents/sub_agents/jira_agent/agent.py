@@ -1,14 +1,25 @@
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
-from tools.jira.sprint_tools import (
-    summarize_current_sprint_v1,
-    summarize_issues_in_sprint_v1,
-    summarize_current_sprint_default,
-    summarize_issues_in_sprint_default,
-    get_issues_for_active_sprint_v1,
-    get_issues_for_active_sprint_default,
-)
-from tools.jira.user_issues_tools import get_issues_assigned_to_user
+try:
+    from tools.jira.sprint_tools import (
+        summarize_current_sprint_v1,
+        summarize_issues_in_sprint_v1,
+        summarize_current_sprint_default,
+        summarize_issues_in_sprint_default,
+        get_issues_for_active_sprint_v1,
+        get_issues_for_active_sprint_default,
+    )
+    from tools.jira.user_issues_tools import get_issues_assigned_to_user
+except ModuleNotFoundError:
+    from backend.tools.jira.sprint_tools import (
+        summarize_current_sprint_v1,
+        summarize_issues_in_sprint_v1,
+        summarize_current_sprint_default,
+        summarize_issues_in_sprint_default,
+        get_issues_for_active_sprint_v1,
+        get_issues_for_active_sprint_default,
+    )
+    from backend.tools.jira.user_issues_tools import get_issues_assigned_to_user
 
 
 """

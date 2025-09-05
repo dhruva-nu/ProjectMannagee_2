@@ -310,33 +310,56 @@ def answer_sprint_hypothetical(project_key: str, issue_key: str, query: str) -> 
 
 
 def who_is_assigned(issue_key: str) -> dict:
-    """Returns the assignee information for the given issue."""
-    load_dotenv()
-    details = _fetch_issue_details(issue_key)
-    if not details:
-        return {"error": f"Could not find details for Jira issue {issue_key}."}
+    """Return assignee info in a stable shape expected by callers/tests.
 
-    assignee_data = details.get("assignee")
-    if not assignee_data or not assignee_data.get("displayName"):
-        return {"unassigned": True, "issue_key": issue_key}
+    Success shape:
+    {"issue_key": KEY, "assignee": {"name": str, "email": str, "avatarUrl": str|None, "accountId": str|None}}
+    Unassigned:
+    {"issue_key": KEY, "assignee": None}
+    Error:
+    {"error": str}
+    """
+    # Basic validation
+    if not issue_key or not isinstance(issue_key, str) or "-" not in issue_key:
+        return {"error": "Invalid issue key"}
+    try:
+        details = _fetch_issue_details(issue_key)
+        if not details:
+            return {"error": f"Jira issue {issue_key} not found."}
+        assignee_data = details.get("assignee")
+        if not assignee_data or not assignee_data.get("displayName"):
+            return {"issue_key": issue_key, "assignee": None}
 
-    display_name = assignee_data.get("displayName")
-    email_address = assignee_data.get("emailAddress")
-    avatar_urls = assignee_data.get("avatarUrls")
-    account_id = assignee_data.get("accountId")
+        display_name = assignee_data.get("displayName")
+        email_address = assignee_data.get("emailAddress")
+        avatar_urls = assignee_data.get("avatarUrls")
+        account_id = assignee_data.get("accountId")
 
-    # Prioritize 48x48, then 32x32, then any available
-    avatar_url = None
-    if avatar_urls:
-        avatar_url = avatar_urls.get("48x48") or avatar_urls.get("32x32") or next(iter(avatar_urls.values()), None)
-
-    return {
-        "displayName": display_name,
-        "emailAddress": email_address,
-        "avatarUrl": avatar_url,
-        "accountId": account_id,
-        "issue_key": issue_key
-    }
+        avatar_url = None
+        if avatar_urls:
+            avatar_url = (
+                avatar_urls.get("48x48")
+                or avatar_urls.get("32x32")
+                or next(iter(avatar_urls.values()), None)
+            )
+        return {
+            "issue_key": issue_key,
+            "assignee": {
+                "name": display_name,
+                "email": email_address,
+                "avatarUrl": avatar_url,
+                "accountId": account_id,
+            },
+        }
+    except requests.exceptions.Timeout:
+        return {"error": "Request timeout while fetching assignee information"}
+    except requests.exceptions.RequestException as e:
+        return {"error": f"Network error while fetching assignee information: {e}"}
+    except ValueError as e:
+        # Likely missing environment variables from _jira_env
+        return {"error": f"Jira environment variables missing or invalid: {e}"}
+    except Exception as e:
+        return {"error": str(e)}
 
 def transition_issue_status(issue_key: str, new_status: str) -> str:
     """
