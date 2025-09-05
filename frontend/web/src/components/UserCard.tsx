@@ -44,6 +44,11 @@ export default function UserCard({ data }: { data: UserCardData }) {
     return { email, designation, avatarUrl, online }
   }, [name, data.email, data.designation, data.avatarUrl, data.online])
 
+  const jiraBase = (typeof window !== 'undefined' && localStorage.getItem('jira_base')) || ''
+  const normalizedBase = jiraBase && jiraBase.endsWith('/') ? jiraBase.slice(0, -1) : jiraBase
+  const jql = `assignee = "${name}" ORDER BY updated DESC`
+  const href = normalizedBase ? `${normalizedBase.replace(/\/$/, '')}/issues/?jql=${encodeURIComponent(jql)}` : undefined
+
   return (
     <motion.div
       id="user-card"
@@ -59,7 +64,7 @@ export default function UserCard({ data }: { data: UserCardData }) {
         duration: 0.6,
         ease: 'easeInOut',
       }}
-      className="bg-secondary-900 border border-secondary-700 rounded-2xl p-4 text-gray-200 text-sm max-w-full shadow-lg relative overflow-hidden"
+      className="bg-secondary-900 border border-secondary-700 rounded-2xl p-0 text-gray-200 text-sm max-w-full shadow-lg relative overflow-hidden"
     >
       {/* glowing background animation */}
       <motion.div
@@ -68,39 +73,77 @@ export default function UserCard({ data }: { data: UserCardData }) {
         transition={{ duration: 6, repeat: Infinity, repeatType: 'mirror' }}
       />
 
-      <div className="flex items-center gap-4 relative z-10">
-        <div className="relative">
-          <motion.img
-            src={computed.avatarUrl}
-            alt={name}
-            className="w-16 h-16 rounded-full border border-cyan-400 object-cover shadow-[0_0_20px_rgba(0,255,255,0.5)]"
-            animate={{ rotate: [0, 5, -5, 0] }}
-            transition={{ duration: 6, repeat: Infinity }}
-          />
-          <motion.span
-            title={computed.online ? 'Online' : 'Offline'}
-            className={`absolute bottom-0 right-0 block w-3.5 h-3.5 rounded-full ring-2 ring-secondary-900 ${
-              computed.online ? 'bg-green-500' : 'bg-red-500'
-            }`}
-            animate={{
-              scale: computed.online ? [1, 1.3, 1] : [1],
-              opacity: computed.online ? [1, 0.6, 1] : [1],
-            }}
-            transition={{
-              duration: 1.5,
-              repeat: Infinity,
-              repeatType: 'mirror',
-            }}
-          />
-        </div>
-        <div>
-          <div className="text-lg font-semibold text-white tracking-wide">
-            {name}
+      {href ? (
+        <a href={href} target="_blank" rel="noreferrer" className="block hover:bg-secondary-750/40">
+          <div className="flex items-center gap-4 relative z-10 p-4">
+            <div className="relative">
+              <motion.img
+                src={computed.avatarUrl}
+                alt={name}
+                className="w-16 h-16 rounded-full border border-cyan-400 object-cover shadow-[0_0_20px_rgba(0,255,255,0.5)]"
+                animate={{ rotate: [0, 5, -5, 0] }}
+                transition={{ duration: 6, repeat: Infinity }}
+              />
+              <motion.span
+                title={computed.online ? 'Online' : 'Offline'}
+                className={`absolute bottom-0 right-0 block w-3.5 h-3.5 rounded-full ring-2 ring-secondary-900 ${
+                  computed.online ? 'bg-green-500' : 'bg-red-500'
+                }`}
+                animate={{
+                  scale: computed.online ? [1, 1.3, 1] : [1],
+                  opacity: computed.online ? [1, 0.6, 1] : [1],
+                }}
+                transition={{
+                  duration: 1.5,
+                  repeat: Infinity,
+                  repeatType: 'mirror',
+                }}
+              />
+            </div>
+            <div>
+              <div className="text-lg font-semibold text-white tracking-wide">
+                {name}
+              </div>
+              <div className="text-xs text-cyan-300">{computed.designation}</div>
+              <div className="text-xs text-gray-300 mt-1">{computed.email}</div>
+            </div>
           </div>
-          <div className="text-xs text-cyan-300">{computed.designation}</div>
-          <div className="text-xs text-gray-300 mt-1">{computed.email}</div>
+        </a>
+      ) : (
+        <div className="flex items-center gap-4 relative z-10 p-4">
+          <div className="relative">
+            <motion.img
+              src={computed.avatarUrl}
+              alt={name}
+              className="w-16 h-16 rounded-full border border-cyan-400 object-cover shadow-[0_0_20px_rgba(0,255,255,0.5)]"
+              animate={{ rotate: [0, 5, -5, 0] }}
+              transition={{ duration: 6, repeat: Infinity }}
+            />
+            <motion.span
+              title={computed.online ? 'Online' : 'Offline'}
+              className={`absolute bottom-0 right-0 block w-3.5 h-3.5 rounded-full ring-2 ring-secondary-900 ${
+                computed.online ? 'bg-green-500' : 'bg-red-500'
+              }`}
+              animate={{
+                scale: computed.online ? [1, 1.3, 1] : [1],
+                opacity: computed.online ? [1, 0.6, 1] : [1],
+              }}
+              transition={{
+                duration: 1.5,
+                repeat: Infinity,
+                repeatType: 'mirror',
+              }}
+            />
+          </div>
+          <div>
+            <div className="text-lg font-semibold text-white tracking-wide">
+              {name}
+            </div>
+            <div className="text-xs text-cyan-300">{computed.designation}</div>
+            <div className="text-xs text-gray-300 mt-1">{computed.email}</div>
+          </div>
         </div>
-      </div>
+      )}
     </motion.div>
   )
 }

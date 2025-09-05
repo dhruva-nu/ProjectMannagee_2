@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
 import JiraStatus, { type JiraStatusData } from './JiraStatus'
 import SprintStatus, { type SprintStatusData } from './SprintStatus'
 import UserCard, { type UserCardData } from './UserCard'
@@ -90,6 +90,24 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [agentName, setAgentName] = useState('codinator')
+
+  // Fetch and cache Jira base URL for link construction across components
+  useEffect(() => {
+    const existing = localStorage.getItem('jira_base')
+    if (existing) return
+    const token = localStorage.getItem('access_token')
+    const url = new URL(`${API_BASE}/jira/base-url`)
+    fetch(url.toString(), { headers: token ? { Authorization: `Bearer ${token}` } : undefined })
+      .then(async (res) => {
+        try {
+          const data = await res.json()
+          if (res.ok && data && typeof data.base === 'string') {
+            localStorage.setItem('jira_base', data.base)
+          }
+        } catch {}
+      })
+      .catch(() => {})
+  }, [])
 
   // All UI decisions are driven by backend-structured responses.
 
@@ -187,6 +205,7 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
           expectedFinishDate: jdata.expectedFinishDate ?? null,
           status: jdata.status ?? null,
           comments: Array.isArray(jdata.comments) ? jdata.comments : [],
+          url: typeof jdata.url === 'string' ? jdata.url : undefined,
         }
         const ui: ChatUiMessage = { type: 'jira_status', data: uiData }
         const uiMsg: Message = { role: 'assistant', ui }

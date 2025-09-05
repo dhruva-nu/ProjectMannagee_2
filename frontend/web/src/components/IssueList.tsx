@@ -36,6 +36,8 @@ const itemVariants: Variants = {
 export default function IssueList({ data }: { data: IssueListData }) {
   const { title = 'Issues', issues } = data
   const [animate, setAnimate] = useState(false) //type:ignore
+  const jiraBase = (typeof window !== 'undefined' && localStorage.getItem('jira_base')) || ''
+  const normalizedBase = jiraBase && jiraBase.endsWith('/') ? jiraBase.slice(0, -1) : jiraBase
 
   useEffect(() => {
     setAnimate(false)
@@ -67,44 +69,45 @@ export default function IssueList({ data }: { data: IssueListData }) {
             <motion.li
               key={it.key}
               variants={itemVariants}
-              className="bg-secondary-800 border border-secondary-700 rounded-md p-3 shadow hover:shadow-[0_0_12px_rgba(0,255,255,0.4)] transition"
+              className="bg-secondary-800 border border-secondary-700 rounded-md p-0 shadow hover:shadow-[0_0_12px_rgba(0,255,255,0.4)] transition overflow-hidden"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-white font-medium truncate">
-                    {it.key}
-                    {it.summary ? (
-                      <span className="opacity-80 font-normal">
-                        {' '}
-                        — {it.summary}
+              {(() => {
+                const href = it.url || (normalizedBase ? `${normalizedBase}/browse/${it.key}` : undefined)
+                const inner = (
+                  <div className="flex items-start justify-between gap-3 p-3">
+                    <div className="min-w-0">
+                      <div className="text-white font-medium truncate">
+                        {it.key}
+                        {it.summary ? (
+                          <span className="opacity-80 font-normal"> — {it.summary}</span>
+                        ) : null}
+                      </div>
+                      <div className="text-xs text-gray-300 mt-1 flex gap-2 flex-wrap">
+                        {it.status ? (
+                          <span className="px-1.5 py-0.5 rounded bg-secondary-700 border border-secondary-600">
+                            {it.status}
+                          </span>
+                        ) : null}
+                        {it.priority ? (
+                          <span className="px-1.5 py-0.5 rounded bg-secondary-700 border border-secondary-600">
+                            {it.priority}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                    {href ? (
+                      <span className="shrink-0 text-xs text-primary-300 hover:text-primary-200 underline" title="Open in Jira">
+                        Open
                       </span>
                     ) : null}
                   </div>
-                  <div className="text-xs text-gray-300 mt-1 flex gap-2 flex-wrap">
-                    {it.status ? (
-                      <span className="px-1.5 py-0.5 rounded bg-secondary-700 border border-secondary-600">
-                        {it.status}
-                      </span>
-                    ) : null}
-                    {it.priority ? (
-                      <span className="px-1.5 py-0.5 rounded bg-secondary-700 border border-secondary-600">
-                        {it.priority}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-                {it.url ? (
-                  <a
-                    href={it.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="shrink-0 text-xs text-primary-300 hover:text-primary-200 underline"
-                    title="Open in Jira"
-                  >
-                    Open
+                )
+                return href ? (
+                  <a href={href} target="_blank" rel="noreferrer" className="block hover:bg-secondary-750/40">
+                    {inner}
                   </a>
-                ) : null}
-              </div>
+                ) : inner
+              })()}
             </motion.li>
           ))}
         </motion.ul>

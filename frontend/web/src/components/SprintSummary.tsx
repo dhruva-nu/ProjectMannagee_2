@@ -30,6 +30,8 @@ export default function SprintSummary({ data }: { data: SprintSummaryData }) {
     startDate,
     endDate,
   } = data || ({} as SprintSummaryData)
+  const jiraBase = (typeof window !== 'undefined' && localStorage.getItem('jira_base')) || ''
+  const normalizedBase = jiraBase && jiraBase.endsWith('/') ? jiraBase.slice(0, -1) : jiraBase
   const statuses = Object.entries(status_counts || {})
   const dateRange = formatRange(startDate, endDate)
 
@@ -84,9 +86,10 @@ export default function SprintSummary({ data }: { data: SprintSummaryData }) {
         <div>
           <div className="font-semibold mb-2 text-primary-300">Sample Issues</div>
           <ul className="space-y-2">
-            {sample_issues.slice(0, 5).map((it) => (
-              <li key={it.key} className="bg-secondary-800 border border-secondary-700 rounded-md p-3">
-                <div className="flex items-start justify-between gap-3">
+            {sample_issues.slice(0, 5).map((it) => {
+              const href = it.url || (normalizedBase ? `${normalizedBase}/browse/${it.key}` : undefined)
+              const inner = (
+                <div className="flex items-start justify-between gap-3 p-3">
                   <div className="min-w-0">
                     <div className="text-white font-medium truncate">
                       {it.key}
@@ -107,20 +110,23 @@ export default function SprintSummary({ data }: { data: SprintSummaryData }) {
                       ) : null}
                     </div>
                   </div>
-                  {it.url ? (
-                    <a
-                      href={it.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="shrink-0 text-xs text-primary-300 hover:text-primary-200 underline"
-                      title="Open in Jira"
-                    >
+                  {href ? (
+                    <span className="shrink-0 text-xs text-primary-300 hover:text-primary-200 underline" title="Open in Jira">
                       Open
-                    </a>
+                    </span>
                   ) : null}
                 </div>
-              </li>
-            ))}
+              )
+              return (
+                <li key={it.key} className="bg-secondary-800 border border-secondary-700 rounded-md p-0 overflow-hidden">
+                  {href ? (
+                    <a href={href} target="_blank" rel="noreferrer" className="block hover:bg-secondary-750/40">
+                      {inner}
+                    </a>
+                  ) : inner}
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}

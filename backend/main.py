@@ -485,6 +485,7 @@ async def jira_issue_status(key: str = Query(..., description="Jira issue key, e
             "expectedFinishDate": duedate,
             "status": status,
             "comments": normalized_comments,
+            "url": f"{jira_server}/browse/{key}",
         }
         _cache_put_issue_status(key, result)
         return result
@@ -607,6 +608,24 @@ async def jira_issue_eta_graph(
         raise
     except Exception as e:
         logging.exception("/jira/issue-eta-graph failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/jira/base-url")
+async def jira_base_url(current_user: User = Depends(get_current_user)):
+    """
+    Returns the configured Jira base URL so the frontend can construct deep links.
+    """
+    try:
+        # Ensure env loaded
+        load_dotenv(dotenv_path=(Path(__file__).parent / ".env"))
+        jira_server = os.getenv("JIRA_SERVER")
+        if not jira_server:
+            raise HTTPException(status_code=500, detail="JIRA_SERVER env var not set")
+        return {"base": jira_server}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("/jira/base-url failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

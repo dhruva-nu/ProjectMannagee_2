@@ -7,6 +7,7 @@ export type JiraStatusData = {
   expectedFinishDate: string | null
   status: string
   comments: string[]
+  url?: string
 }
 
 const commentsVariants: Variants = {
@@ -25,6 +26,8 @@ const commentItem: Variants = {
 
 export default function JiraStatus({ data }: { data: JiraStatusData }) {
   const { key, name, expectedFinishDate, status, comments } = data
+  const jiraBase = (typeof window !== 'undefined' && localStorage.getItem('jira_base')) || ''
+  const issueUrl = data.url || (jiraBase ? `${jiraBase.replace(/\/$/, '')}/browse/${key}` : undefined)
   const [animate, setAnimate] = useState(false)
 
   useEffect(() => {
@@ -55,7 +58,19 @@ export default function JiraStatus({ data }: { data: JiraStatusData }) {
 
       <div className="flex items-center justify-between mb-3 relative z-10">
         <div className="font-bold text-lg text-primary-400">
-          Jira Issue: {key}
+          {issueUrl ? (
+            <a
+              href={issueUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="hover:underline"
+              title="Open in Jira"
+            >
+              Jira Issue: {key}
+            </a>
+          ) : (
+            <>Jira Issue: {key}</>
+          )}
         </div>
         <motion.div
           className="text-accent-cyan font-semibold text-base"
