@@ -12,22 +12,13 @@ export type SprintStatusData = {
 export default function SprintStatus({ data }: { data: SprintStatusData }) {
   const { name, startDate, endDate, notes, totalIssues = 0, completedIssues = 0 } = data
 
-  const [animate, setAnimate] = useState(false)
-
-  useEffect(() => {
-    setAnimate(false)
-    // Force reflow to restart animation
-    void document.getElementById('sprint-status-card')?.offsetWidth
-    setAnimate(true)
-  }, [data])
-
   const dateRange = startDate || endDate ? `${startDate || 'Unknown'} → ${endDate || 'Unknown'}` : 'No dates'
   const safeTotal = Math.max(0, totalIssues)
   const safeDone = Math.min(Math.max(0, completedIssues), safeTotal)
   const pct = safeTotal === 0 ? 0 : Math.round((safeDone / safeTotal) * 100)
 
   return (
-    <div id="sprint-status-card" className={`bg-secondary-900 border border-secondary-700 rounded-lg p-4 text-gray-200 text-sm max-w-full shadow-lg ${animate ? 'animate-fadeIn' : ''}`}>
+    <div id="sprint-status-card" className={`bg-secondary-900 border border-secondary-700 rounded-lg p-4 text-gray-200 text-sm max-w-full shadow-lg`}>
       <div className="flex items-center justify-between mb-3">
         <div className="font-bold text-lg text-primary-400">Sprint</div>
         <div className="opacity-90 text-xs sm:text-sm">{dateRange}</div>

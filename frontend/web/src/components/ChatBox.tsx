@@ -4,6 +4,7 @@ import SprintStatus, { type SprintStatusData } from './SprintStatus'
 import UserCard, { type UserCardData } from './UserCard'
 import IssueList, { type IssueListData } from './IssueList'
 import EtaEstimate, { type EtaEstimateData } from './EtaEstimate'
+import SprintSummary, { type SprintSummaryData } from './SprintSummary'
 
 type Message = {
   role: 'user' | 'assistant' | 'system'
@@ -14,6 +15,7 @@ type Message = {
     | { type: 'user_card'; data: UserCardData }
     | { type: 'issue_list'; data: IssueListData }
     | { type: 'eta_estimate'; data: EtaEstimateData }
+    | { type: 'sprint_summary'; data: SprintSummaryData }
 }
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000'
@@ -29,6 +31,7 @@ export type ChatUiMessage =
   | { type: 'user_card'; data: UserCardData }
   | { type: 'issue_list'; data: IssueListData }
   | { type: 'eta_estimate'; data: EtaEstimateData }
+  | { type: 'sprint_summary'; data: SprintSummaryData }
 
 // Helper utilities to extract keys without regex
 function extractIssueKey(text: string): string | undefined {
@@ -100,7 +103,10 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
       // Always forward to agent
       const url = new URL(`${API_BASE}/codinator/run-agent`)
       url.searchParams.set('agent_name', agentName)
-      url.searchParams.set('prompt', userMsg.content || '')
+      // Append lightweight guidance so backend includes total_issues for sprint_summary UI
+      const guidance = '\n\n[Frontend requirements]\n- If you return a JSON response with "ui": "sprint_summary", ensure the object has:\n  - Either top-level fields or a nested "data" object.\n  - Include an integer field named "total_issues" in the same nesting level as other fields.\n  - Keep the response format unchanged otherwise.\n';
+      const promptText = `${userMsg.content || ''}${guidance}`
+      url.searchParams.set('prompt', promptText)
       const token = localStorage.getItem('access_token')
       const res = await fetch(url.toString(), {
         method: 'POST',
@@ -313,6 +319,39 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
         const uiMsg: Message = { role: 'assistant', ui }
         setMessages((prev) => [...prev, uiMsg])
         onUiMessage?.(ui)
+      } else if (uiType === 'sprint_summary') {
+        // Support both shapes:
+        // 1) { ui: 'sprint_summary', project, total_issues, status_counts, sample_issues }
+        // 2) { ui: 'sprint_summary', data: { ... } }
+        const payload = (data && typeof data.data === 'object') ? data.data : data
+        const rawIssues = Array.isArray(payload.sample_issues) ? payload.sample_issues : []
+        const uiData: SprintSummaryData = {
+          project: typeof payload.project === 'string' ? payload.project : '',
+          total_issues: typeof payload.total_issues === 'number' ? payload.total_issues : 0,
+          status_counts: (payload.status_counts && typeof payload.status_counts === 'object') ? payload.status_counts : {},
+          sample_issues: rawIssues
+            .map((it: any) => ({
+              key: String(it.key || ''),
+              summary: typeof it.summary === 'string' ? it.summary : undefined,
+              status: typeof it.status === 'string' ? it.status : undefined,
+              priority: typeof it.priority === 'string' ? it.priority : undefined,
+              url: typeof it.url === 'string' ? it.url : undefined,
+            }))
+            .filter((it: any) => it.key),
+          sprintName: typeof payload.sprintName === 'string'
+            ? payload.sprintName
+            : (typeof payload.status === 'string' ? payload.status : undefined),
+          startDate: typeof payload.startDate === 'string'
+            ? payload.startDate
+            : (typeof payload.start === 'string' ? payload.start : undefined),
+          endDate: typeof payload.endDate === 'string'
+            ? payload.endDate
+            : (typeof payload.end === 'string' ? payload.end : undefined),
+        }
+        const ui: ChatUiMessage = { type: 'sprint_summary', data: uiData }
+        const uiMsg: Message = { role: 'assistant', ui }
+        setMessages((prev) => [...prev, uiMsg])
+        onUiMessage?.(ui)
       } else if (uiType === 'generic') {
         // Generic directive – show provided text
         const raw = (data?.data && typeof data.data.text === 'string' ? data.data.text : '') || (typeof data?.response === 'string' ? data.response : '')
@@ -386,7 +425,7 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
         {messages.map((m, idx) => (
           <div
             key={idx}
-            className={`p-2 rounded-lg whitespace-pre-wrap break-words leading-tight text-sm ${
+            className={`p-2 rounded-lg whitespace-pre-wrap break-words leading-tight text-sm animate-fadeIn ${
               m.ui ? 'w-full max-w-[900px] md:max-w-[1100px]' : 'max-w-[700px]'
             } ${
               m.role === 'user'
@@ -406,6 +445,8 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
               <IssueList data={m.ui.data} />
             ) : m.ui?.type === 'eta_estimate' ? (
               <EtaEstimate data={m.ui.data} />
+            ) : m.ui?.type === 'sprint_summary' ? (
+              <SprintSummary data={m.ui.data} />
             ) : (
               m.content
             )}

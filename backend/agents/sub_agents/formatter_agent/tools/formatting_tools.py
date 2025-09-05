@@ -204,29 +204,24 @@ def format_issue_details(issue_data: Dict[str, Any]) -> Dict[str, Any]:
         issue_data: Raw issue data
         
     Returns:
-        Structured JSON for issue details display
+        Structured JSON for issue details display, now using issue_list UI
     """
-    return {
-        "ui": "issue_details",
-        "data": {
-            "key": issue_data.get("key", ""),
-            "summary": issue_data.get("summary", ""),
-            "description": issue_data.get("description", ""),
-            "status": issue_data.get("status", ""),
-            "priority": issue_data.get("priority", ""),
-            "assignee": issue_data.get("assignee", {}),
-            "reporter": issue_data.get("reporter", {}),
-            "created": issue_data.get("created", ""),
-            "updated": issue_data.get("updated", ""),
-            "due_date": issue_data.get("due_date", ""),
-            "story_points": issue_data.get("story_points", 0),
-            "labels": issue_data.get("labels", []),
-            "components": issue_data.get("components", []),
-            "blockers": issue_data.get("blockers", []),
-            "dependencies": issue_data.get("dependencies", []),
-            "comments": issue_data.get("comments", [])
-        }
+    issue_key = issue_data.get("key", "N/A")
+    title = f"Issue Details for {issue_key}"
+
+    # Prepare the single issue in the format expected by format_issue_list
+    formatted_single_issue = {
+        "key": issue_data.get("key", ""),
+        "summary": issue_data.get("summary", ""),
+        "status": issue_data.get("status", ""),
+        "priority": issue_data.get("priority", ""),
+        "url": issue_data.get("url", ""), # Assuming 'url' might be present in issue_data
+        "assignee": issue_data.get("assignee", {}).get("name"), # Extract assignee name
+        # Add other fields if needed by IssueListItem, e.g., story_points, estimated_days
     }
+
+    # Call format_issue_list with the single issue
+    return format_issue_list(title, [formatted_single_issue])
 
 
 def format_dependency_graph(graph_data: Dict[str, Any], issue_key: str = "") -> Dict[str, Any]:
