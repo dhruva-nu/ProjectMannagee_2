@@ -206,6 +206,51 @@ def _jira_count(jql: str) -> Optional[int]:
     except Exception:
         return None
 
+def _jira_search(jql: str, max_results: int = 10) -> Optional[list[dict]]:
+    """
+    Search Jira issues by JQL and return a simplified list of dicts with
+    keys: key, summary, status, due.
+    """
+    base_and_auth = _jira_auth_headers()
+    if not base_and_auth:
+        return None
+    jira_server, auth = base_and_auth
+    headers = {"Accept": "application/json"}
+    try:
+        resp = requests.get(
+            f"{jira_server}/rest/api/2/search",
+            headers=headers,
+            auth=auth,
+            params={
+                "jql": jql,
+                "maxResults": max(0, min(max_results, 50)),
+                "fields": "key,summary,duedate,status",
+            },
+        )
+        if not resp.ok:
+            return None
+        data = resp.json()
+        issues = data.get("issues", []) or []
+        out = []
+        for it in issues:
+            key = it.get("key") or ""
+            fields = it.get("fields", {}) or {}
+            summary = fields.get("summary") or ""
+            due = fields.get("duedate") or None
+            status = None
+            status_obj = fields.get("status") or {}
+            if isinstance(status_obj, dict):
+                status = status_obj.get("name")
+            out.append({
+                "key": key,
+                "summary": summary,
+                "due": due,
+                "status": status,
+            })
+        return out
+    except Exception:
+        return None
+
 def _jira_summary_since(start_dt_local: datetime) -> dict:
     # Use Jira JQL date in UTC ISO 8601; Jira 2 API supports - use start local converted to UTC
     start_utc = start_dt_local.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
@@ -244,6 +289,42 @@ def handle_cli_commands(effective_prompt: str) -> dict | None:
                 msg.append(f"Tracking GitHub {repo} (default branch).")
         else:
             msg.append("No repo provided; you can specify with repo=owner/name or --repo owner/name.")
+        # Add today's Jira tasks to focus on
+        msg.append("")
+        msg.append("Today's focus suggestions (Jira):")
+        due_today_jql = (
+            "assignee = currentUser() AND statusCategory != Done AND due >= startOfDay() AND due <= endOfDay() ORDER BY priority DESC, due ASC"
+        )
+        in_progress_jql = (
+            "assignee = currentUser() AND statusCategory != Done ORDER BY priority DESC, updated DESC"
+        )
+        due_today = _jira_search(due_today_jql, max_results=10)
+        in_progress = _jira_search(in_progress_jql, max_results=10)
+        # Due today section
+        msg.append("- Due today:")
+        if isinstance(due_today, list) and due_today:
+            for it in due_today:
+                key = it.get("key") or ""
+                summary = it.get("summary") or ""
+                due = it.get("due") or ""
+                msg.append(f"  • {key}: {summary} ({due})")
+        elif due_today is None:
+            msg.append("  • Jira not configured. Set JIRA_SERVER, JIRA_USERNAME, JIRA_API to enable.")
+        else:
+            msg.append("  • None")
+        # In progress / to pick up section
+        msg.append("- In progress / next up:")
+        if isinstance(in_progress, list) and in_progress:
+            for it in in_progress[:10]:
+                key = it.get("key") or ""
+                summary = it.get("summary") or ""
+                status = it.get("status") or ""
+                msg.append(f"  • {key}: {summary} [{status}]")
+        elif in_progress is None:
+            msg.append("  • Jira not configured. Set JIRA_SERVER, JIRA_USERNAME, JIRA_API to enable.")
+        else:
+            msg.append("  • None")
+        msg.append("")
         msg.append("Use --end day to get Jira and commit summary since start.")
         return {"response": "\n".join(msg)}
 

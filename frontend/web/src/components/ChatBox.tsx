@@ -5,6 +5,7 @@ import UserCard, { type UserCardData } from './UserCard'
 import IssueList, { type IssueListData } from './IssueList'
 import EtaEstimate, { type EtaEstimateData } from './EtaEstimate'
 import SprintSummary, { type SprintSummaryData } from './SprintSummary'
+import WorkdaySummary, { type WorkdaySummaryData } from './WorkdaySummary'
 
 type Message = {
   role: 'user' | 'assistant' | 'system'
@@ -16,6 +17,7 @@ type Message = {
     | { type: 'issue_list'; data: IssueListData }
     | { type: 'eta_estimate'; data: EtaEstimateData }
     | { type: 'sprint_summary'; data: SprintSummaryData }
+    | { type: 'workday_summary'; data: WorkdaySummaryData }
 }
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000'
@@ -32,6 +34,7 @@ export type ChatUiMessage =
   | { type: 'issue_list'; data: IssueListData }
   | { type: 'eta_estimate'; data: EtaEstimateData }
   | { type: 'sprint_summary'; data: SprintSummaryData }
+  | { type: 'workday_summary'; data: WorkdaySummaryData }
 
 // Helper utilities to extract keys without regex
 function extractIssueKey(text: string): string | undefined {
@@ -381,14 +384,148 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
         const raw = (data?.data && typeof data.data.text === 'string' ? data.data.text : '') || (typeof data?.response === 'string' ? data.response : '')
         const assistantMsg: Message = { role: 'assistant', content: raw || `[${uiType}]` }
         setMessages((prev) => [...prev, assistantMsg])
-      } else {
-        // Plain text fallback – backend decides UI; we only display text.
+      } else if (true) {
+        // Plain text fallback – try to render structured UI for start/end day commands
         const raw = (data?.response && String(data.response).trim()) || ''
-        const assistantMsg: Message = {
-          role: 'assistant',
-          content: raw || 'No response from agent'
+        const original = userMsg.content || ''
+        const norm = original.toLowerCase().split(/\s+/).join(' ').trim()
+
+        const parseStart = (t: string): WorkdaySummaryData | null => {
+          const lines = (t || '').split('\n').map((s) => s.trim())
+          if (lines.length === 0) return null
+          const out: WorkdaySummaryData = { mode: 'start', title: 'Workday started' }
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i]
+            if (line.startsWith('Workday started at ')) {
+              out.startedAt = line.slice('Workday started at '.length)
+            } else if (line.startsWith('Tracking GitHub ')) {
+              const rest = line.slice('Tracking GitHub '.length)
+              // rest can be e.g. "owner/repo@branch." or "owner/repo (default branch)."
+              let clean = rest
+              if (clean.endsWith('.')) clean = clean.slice(0, -1)
+              const atIdx = clean.indexOf('@')
+              if (atIdx !== -1) {
+                out.trackingRepo = clean.slice(0, atIdx)
+                out.trackingBranch = clean.slice(atIdx + 1)
+              } else {
+                const sp = clean.indexOf(' ')
+                out.trackingRepo = sp === -1 ? clean : clean.slice(0, sp)
+              }
+            } else if (line === "- Due today:") {
+              const issues: { key: string; summary?: string; due?: string }[] = []
+              let j = i + 1
+              while (j < lines.length) {
+                const l = lines[j]
+                if (!l.startsWith('•') && !l.startsWith('-') && !l.startsWith('  •')) break
+                const s = l.replace(/^[-•]\s*/,'').replace(/^\u2022\s*/, '').trim()
+                if (s && s !== 'None' && s.indexOf(':') !== -1) {
+                  const colon = s.indexOf(':')
+                  const key = s.slice(0, colon).trim()
+                  let rest = s.slice(colon + 1).trim()
+                  // extract due in parens at end if present
+                  let due: string | undefined
+                  if (rest.endsWith(')')) {
+                    const open = rest.lastIndexOf('(')
+                    if (open !== -1 && open < rest.length - 1) {
+                      due = rest.slice(open + 1, rest.length - 1)
+                      rest = rest.slice(0, open).trim()
+                    }
+                  }
+                  issues.push({ key, summary: rest, due })
+                }
+                j++
+              }
+              out.dueToday = issues
+            } else if (line === "- In progress / next up:") {
+              const issues: { key: string; summary?: string; status?: string }[] = []
+              let j = i + 1
+              while (j < lines.length) {
+                const l = lines[j]
+                if (!l.startsWith('•') && !l.startsWith('-') && !l.startsWith('  •')) break
+                const s = l.replace(/^[-•]\s*/,'').replace(/^\u2022\s*/, '').trim()
+                if (s && s !== 'None') {
+                  // Expected: KEY: summary [STATUS]
+                  const colon = s.indexOf(':')
+                  if (colon !== -1) {
+                    const key = s.slice(0, colon).trim()
+                    let rest = s.slice(colon + 1).trim()
+                    let status: string | undefined
+                    if (rest.endsWith(']')) {
+                      const open = rest.lastIndexOf('[')
+                      if (open !== -1 && open < rest.length - 1) {
+                        status = rest.slice(open + 1, rest.length - 1)
+                        rest = rest.slice(0, open).trim()
+                      }
+                    }
+                    issues.push({ key, summary: rest, status })
+                  }
+                }
+                j++
+              }
+              out.nextUp = issues
+            }
+          }
+          return out
         }
-        setMessages((prev) => [...prev, assistantMsg])
+
+        const parseEnd = (t: string): WorkdaySummaryData | null => {
+          const lines = (t || '').split('\n').map((s) => s.trim())
+          if (!lines.length) return null
+          const out: WorkdaySummaryData = { mode: 'end', title: 'Workday summary' }
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i]
+            if (line.startsWith('Workday summary since ')) {
+              out.since = line.slice('Workday summary since '.length)
+            } else if (line === 'Jira:' && i + 3 < lines.length) {
+              const c = lines[i + 1]
+              const r = lines[i + 2]
+              const w = lines[i + 3]
+              const numOrStr = (s: string, prefix: string): number | string | undefined => {
+                if (!s.startsWith(prefix)) return undefined
+                const v = s.slice(prefix.length).trim()
+                const n = Number(v)
+                return Number.isFinite(n) ? n : v
+              }
+              out.jira = {
+                completed: numOrStr(c, '- Completed issues: '),
+                raised: numOrStr(r, '- Raised issues: '),
+                working: numOrStr(w, '- Working on: '),
+              }
+            } else if (line === 'GitHub commits:') {
+              const gh: { repo?: string; summaryText?: string } = {}
+              // Next line might be Repository: ...
+              let j = i + 1
+              if (j < lines.length && lines[j].startsWith('Repository: ')) {
+                gh.repo = lines[j].slice('Repository: '.length)
+                j++
+              }
+              gh.summaryText = lines.slice(j).join('\n')
+              out.github = gh
+              break
+            }
+          }
+          return out
+        }
+
+        let uiData: WorkdaySummaryData | null = null
+        if (norm.includes('--start day') || norm.includes('--start-day')) {
+          uiData = parseStart(raw)
+        } else if (norm.includes('--end day') || norm.includes('--end-day')) {
+          uiData = parseEnd(raw)
+        }
+
+        if (uiData) {
+          const ui: ChatUiMessage = { type: 'workday_summary', data: uiData }
+          const uiMsg: Message = { role: 'assistant', ui }
+          setMessages((prev) => [...prev, uiMsg])
+          onUiMessage?.(ui)
+        } else {
+          const assistantMsg: Message = {
+            role: 'assistant',
+            content: raw || 'No response from agent'
+          }
+          setMessages((prev) => [...prev, assistantMsg])
+        }
       }
     }
     catch (e: any) {
@@ -466,6 +603,8 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
               <EtaEstimate data={m.ui.data} />
             ) : m.ui?.type === 'sprint_summary' ? (
               <SprintSummary data={m.ui.data} />
+            ) : m.ui?.type === 'workday_summary' ? (
+              <WorkdaySummary data={m.ui.data} />
             ) : (
               m.content
             )}
