@@ -350,7 +350,9 @@ const ChatBox = forwardRef<ChatBoxHandle, { onUiMessage?: (ui: ChatUiMessage) =>
         const uiData: SprintSummaryData = {
           project: typeof payload.project === 'string' ? payload.project : '',
           total_issues: typeof payload.total_issues === 'number' ? payload.total_issues : 0,
-          status_counts: (payload.status_counts && typeof payload.status_counts === 'object') ? payload.status_counts : {},
+          status_categories: (payload.status_categories && typeof payload.status_categories === 'object')
+            ? payload.status_categories
+            : ((payload.status_counts && typeof payload.status_counts === 'object') ? payload.status_counts : {}),
           sample_issues: rawIssues
             .map((it: any) => ({
               key: String(it.key || ''),

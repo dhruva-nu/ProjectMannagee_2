@@ -5,7 +5,7 @@ export type SprintSummaryData = {
   // Existing fields (optional)
   project?: string
   total_issues?: number
-  status_counts?: Record<string, number>
+  status_categories?: Record<string, number> // Changed from status_counts
   sample_issues?: IssueListItem[]
   // New minimal summary fields
   sprintName?: string
@@ -24,7 +24,7 @@ export default function SprintSummary({ data }: { data: SprintSummaryData }) {
   const {
     project,
     total_issues = 0,
-    status_counts = {},
+    status_categories = {}, // Changed from status_counts
     sample_issues = [],
     sprintName,
     startDate,
@@ -32,7 +32,7 @@ export default function SprintSummary({ data }: { data: SprintSummaryData }) {
   } = data || ({} as SprintSummaryData)
   const jiraBase = (typeof window !== 'undefined' && localStorage.getItem('jira_base')) || ''
   const normalizedBase = jiraBase && jiraBase.endsWith('/') ? jiraBase.slice(0, -1) : jiraBase
-  const statuses = Object.entries(status_counts || {})
+  const statuses = Object.entries(status_categories || {})
   const dateRange = formatRange(startDate, endDate)
 
   return (

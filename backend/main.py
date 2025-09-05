@@ -287,18 +287,22 @@ async def run_codinator_agent(
         logger.debug("Received prompt: %s", effective_prompt)
         if not effective_prompt or not effective_prompt.strip():
             raise HTTPException(status_code=422, detail="Missing 'prompt'. Provide it in JSON body or as query param ?prompt=")
+        # Split out any frontend-only guidance so it doesn't affect routing/tool calls
+        # Keep the guidance for the formatter agent later.
+        guidance_marker = "\n\n[Frontend requirements]"
+        core_prompt = effective_prompt.split(guidance_marker, 1)[0].strip() if guidance_marker in effective_prompt else effective_prompt.strip()
 
         # Handle CLI-like commands
-        cli_response = handle_cli_commands(effective_prompt)
+        cli_response = handle_cli_commands(core_prompt)
         if cli_response:
             return cli_response
 
         # Lightweight pre-router: handle simple Jira UI intents locally to avoid LLM/tool calls
         # Patterns like: "what is the status of issue ABC-123" or "jira status for ABC-123"
-        if effective_prompt:
-            prompt_lc = effective_prompt.lower()
+        if core_prompt:
+            prompt_lc = core_prompt.lower()
             # Extract a plausible JIRA key (prefix-num)
-            issue_key = _extract_jira_key(effective_prompt)
+            issue_key = _extract_jira_key(core_prompt)
             if issue_key and ("status" in prompt_lc) and ("issue" in prompt_lc or "jira" in prompt_lc):
                 # Return a structured UI directive for the frontend to consume directly
                 logging.getLogger("api").info("/codinator/run-agent pre-router handled jira status for %s", issue_key)
@@ -346,11 +350,11 @@ async def run_codinator_agent(
                     logging.getLogger("api").exception("sprint removal impact failed: %s", e)
                     # Fall through to full agent if error
 
-        message = genai_types.Content(role="user", parts=[genai_types.Part(text=effective_prompt)])
+        message = genai_types.Content(role="user", parts=[genai_types.Part(text=core_prompt)])
 
         final_response = ""
         # Log core agent invocation and prompt
-        logger.info("[core agent] invoking with prompt: %s", effective_prompt)
+        logger.info("[core agent] invoking with prompt: %s", core_prompt)
         with anyio.move_on_after(45) as cancel_scope:  # 45s timeout
             async for event in runner.run_async(
                 user_id=user_id,

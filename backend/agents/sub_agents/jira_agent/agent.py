@@ -10,6 +10,7 @@ try:
         get_issues_for_active_sprint_default,
     )
     from tools.jira.user_issues_tools import get_issues_assigned_to_user
+    from tools.jira.comment_tools import add_comment_to_jira_issue
 except ModuleNotFoundError:
     from backend.tools.jira.sprint_tools import (
         summarize_current_sprint_v1,
@@ -20,6 +21,7 @@ except ModuleNotFoundError:
         get_issues_for_active_sprint_default,
     )
     from backend.tools.jira.user_issues_tools import get_issues_assigned_to_user
+    from backend.tools.jira.comment_tools import add_comment_to_jira_issue
 
 
 """
@@ -49,6 +51,7 @@ jira_agent = Agent(
         FunctionTool(get_issues_assigned_to_user),
         FunctionTool(get_issues_for_active_sprint_v1),
         FunctionTool(get_issues_for_active_sprint_default),
+        FunctionTool(add_comment_to_jira_issue),
     ],
     sub_agents=[],
 )
